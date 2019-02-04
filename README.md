@@ -1,6 +1,7 @@
 A naive framework of Jpeg compression layer added to some nenural networks.
 
 - Todo 
+
 unit test: 
 1. single image output
 2. psnr to each step: rgb2ycbcr, dct, quantize
