@@ -101,11 +101,15 @@ num_classes = 2
 batch_size = 8
 
 # Number of epochs to train for 
-num_epochs = 15
+num_epochs = 25
+
+#Flag for either add jpeg layer to train quantization matrix
+add_jpeg_layer = True
+
 
 # Flag for feature extracting. When False, we finetune the whole model, 
 #   when True we only update the reshaped layer params
-feature_extract = False
+feature_extract = True
 
 
 ######################################################################
@@ -415,7 +419,7 @@ def set_parameter_requires_grad(model, feature_extracting):
 # 
 
 
-def initialize_model(model_name, num_classes, feature_extract, use_pretrained=True):
+def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = False, use_pretrained=True):
     # Initialize these variables which will be set in this if statement. Each of these
     #   variables is model specific.
     model_ft = None
@@ -483,11 +487,12 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         print("Invalid model name, exiting...")
         exit()
     
-    my_model = nn.Sequential(JpegLayer(),model_ft)
-    return my_model, input_size
+    if add_jpeg_layer:
+        model_ft = nn.Sequential(JpegLayer(),model_ft)
+    return model_ft, input_size
 
 # Initialize the model for this run
-model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
+model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer, use_pretrained=True)
 
 # Print the model we just instantiated
 print(model_ft) 
@@ -510,13 +515,13 @@ data_transforms = {
         transforms.RandomResizedCrop(input_size),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        #transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
     'val': transforms.Compose([
         transforms.Resize(input_size),
         transforms.CenterCrop(input_size),
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        #transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
 }
 
@@ -594,6 +599,31 @@ criterion = nn.CrossEntropyLoss()
 # Train and evaluate
 model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs, is_inception=(model_name=="inception"))
 
+# Let's visualize feature maps
+activation = {}
+def get_activation(name):
+    def hook(model, input, output):
+        activation[name] = output.detach()
+    return hook
+
+model_ft[0].register_forward_hook(get_activation('0.JpegLayer'))
+data, _ = image_datasets["train"][0]
+
+fig, axarr = plt.subplots(2)
+f1 = data.cpu().data.numpy()
+f1 = (np.transpose(f1,(1,2,0))*255).astype(np.uint8)
+axarr[0].imshow(f1)
+
+data.unsqueeze_(0)
+output = model_ft(data.to(device))
+
+f2 = activation['0.JpegLayer'].squeeze().cpu().data.numpy()
+f2 = (np.transpose(f2, (1,2,0))*255).astype(np.uint8)
+axarr[1].imshow(f2)
+#fig, axarr = plt.subplots(act.size(0))
+#for idx in range(act.size(0)):
+#    axarr[idx].imshow(act[idx].cpu())
+plt.show()
 
 ######################################################################
 # Comparison with Model Trained from Scratch
