@@ -101,7 +101,7 @@ num_classes = 2
 batch_size = 8
 
 # Number of epochs to train for 
-num_epochs = 25
+num_epochs = 0
 
 #Flag for either add jpeg layer to train quantization matrix
 add_jpeg_layer = True
@@ -109,7 +109,7 @@ add_jpeg_layer = True
 
 # Flag for feature extracting. When False, we finetune the whole model, 
 #   when True we only update the reshaped layer params
-feature_extract = True
+feature_extract = False
 
 
 ######################################################################
@@ -599,6 +599,14 @@ criterion = nn.CrossEntropyLoss()
 # Train and evaluate
 model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs, is_inception=(model_name=="inception"))
 
+
+#print the trained matrix
+for name,param in model_ft.named_parameters():
+    if param.requires_grad == True and\
+            name == "0.quantize":
+        print(param.data*255)
+
+
 # Let's visualize feature maps
 activation = {}
 def get_activation(name):
@@ -620,11 +628,21 @@ output = model_ft(data.to(device))
 f2 = activation['0.JpegLayer'].squeeze().cpu().data.numpy()
 f2 = (np.transpose(f2, (1,2,0))*255).astype(np.uint8)
 axarr[1].imshow(f2)
-#fig, axarr = plt.subplots(act.size(0))
-#for idx in range(act.size(0)):
-#    axarr[idx].imshow(act[idx].cpu())
 plt.show()
+#psnr
+from psnr import psnr
+from PIL import Image
+im = Image.fromarray(f1, 'RGB')
+im.save('to_jpeg.png','JPEG')
+im = Image.open("to_jpeg.png")
+im = np.array(im, np.int16).transpose(2,0,1)
 
+f1 = np.array(f1,np.int16).transpose(2,0,1)
+f2 = np.array(f2,np.int16).transpose(2,0,1)
+print("compression results!")
+print("PSNR - my jpeg: ", psnr(f2[0],f1[0]))
+print("PSNR - PIL jpeg", psnr(im[0], f1[0]))
+print("PSNR - my vs. PIL", psnr(im[0], f2[0]))
 ######################################################################
 # Comparison with Model Trained from Scratch
 # ------------------------------------------
