@@ -1,10 +1,10 @@
-#JpegNN
+# JpegNN
 A naive framework of Jpeg compression layer added to some nenural networks.
 
-##Dependency
+## Dependency
 Pytorch, Numpy, Argparse, PIL, Matplotlib
 
-##Usage
+## Usage
 cnn.py 
 - A normal neural network framework. One can choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]. (Actually inception is not finished because I haven't add padding yet.)
 - One can choose to add jpeg layer by setting the add\_jpeg\_layer flag
