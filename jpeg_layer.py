@@ -7,9 +7,8 @@ from torch.nn.modules.module import Module
 import torch_dct as dct
 
 class JpegLayer(torch.nn.Module):
-    def __init__(self, block_size = 8, quality = 75):
+    def __init__(self, rand_qtable = True, block_size = 8, quality = 75):
         super(JpegLayer, self).__init__()
-        #quantizeY = torch.Tensor(block_size, block_size)
         quantizeY = np.array([
         [16, 11, 10, 16, 24, 40, 51, 61],
         [12, 12, 14, 19, 26, 58, 60, 55],
@@ -19,8 +18,6 @@ class JpegLayer(torch.nn.Module):
         [24, 35, 55, 64, 81, 104, 113, 92],
         [49, 64, 78, 87, 103, 121, 120, 101],
         [72, 92, 95, 98, 112, 100, 103, 99]])/255
-        #torch.nn.init.uniform(quantize, 0, 1)
-        #quantizeC = torch.Tensor(block_size, block_size)
         quantizeC = np.array([
         [17,18,24,47,99,99,99,99],
         [18,21,26,66,99,99,99,99],
@@ -31,12 +28,17 @@ class JpegLayer(torch.nn.Module):
         [99,99,99,99,99,99,99,99],
         [99,99,99,99,99,99,99,99]     
         ])/255
-        quantize = np.array([quantizeY, quantizeC, quantizeC])
-        self.quantize = torch.nn.Parameter(torch.cuda.FloatTensor(quantize))
+        if rand_qtable:
+            quantize = np.array([quantizeY, quantizeC, quantizeC])
+            self.quantize = torch.nn.Parameter(torch.cuda.FloatTensor(quantize))
+        else:
+            quantize = torch.cuda.FloatTensor(3, block_size, block_size)
+            torch.nn.init.uniform(quantize,0,1)
+            self.quantize = torch.nn.Parameter(quantize)
+        
         self.quality = self.__scale_quality(quality)
         self.bs = block_size
         self.dctmtx = self.__dctmtx(self.bs)
-        print(self.dctmtx)
     def forward(self, input):
         
         #preprocessing

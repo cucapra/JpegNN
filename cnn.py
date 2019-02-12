@@ -54,6 +54,7 @@ import matplotlib.pyplot as plt
 import time
 import os
 import copy
+import argparse
 from jpeg_layer import *
 print("PyTorch Version: ",torch.__version__)
 print("Torchvision Version: ",torchvision.__version__)
@@ -89,30 +90,84 @@ print("Torchvision Version: ",torchvision.__version__)
 # the others remain fixed.
 # 
 
+parser = argparse.ArgumentParser(description = \
+        'Neural Network with JpegLayer')
+
 # Top level data directory. Here we assume the format of the directory conforms 
 #   to the ImageFolder structure
-data_dir = "../jennaPNGSet/"
-
+#data_dir = "./hymenoptera_data"
+parser.add_argument('--data_dir', '-d', type=str,\
+    default='./hymenoptera_data', \
+    help='Directory of the input data. \
+    String. Default: ./hymenoptera_data')
 # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]
-model_name = "squeezenet"
+#model_name = "squeezenet"
+parser.add_argument('--model_name', '-m', type=str,\
+    default='squeezenet',\
+    help = 'NN models to choose from [resnet, alexnet, \
+    vgg, squeezenet, densenet, inception]. \
+    String. Default: squeezenet')
 
 # Number of classes in the dataset
-num_classes = 3
-
+#num_classes = 3
+parser.add_argument('--num_classes', '-c', type=int,\
+    default = 3,\
+    help = 'Number of classes in the dataset. \
+    Integer. Default: 3')
 # Batch size for training (change depending on how much memory you have)
-batch_size = 8
+#batch_size = 8
+parser.add_argument('--batch_size', '-b', type=int,\
+    default = 8,\
+    help = 'Batch size for training (can change depending\
+    on how much memory you have. \
+    Integer. Default: 8)')
+
 
 # Number of epochs to train for 
-num_epochs = 0
+#num_epochs = 25
+parser.add_argument('--num_epochs', '-ep', type=int,\
+    default = 25,\
+    help = 'Number of echos to train for. \
+    Integer. Default:25')
 
-#Flag for either add jpeg layer to train quantization matrix
-add_jpeg_layer = True
+#Flag for whether to add jpeg layer to train quantization matrix
+#add_jpeg_layer = True
+parser.add_argument('--add_jpeg_layer', '-jpeg', \
+    action = 'store_false',\
+    help = 'Flag for adding jpeg layer to neural network. \
+    Bool. Default: True')
 
+#Flag for initialization for quantization table. When true,qtable is uniformly random. When false, qtable is jpeg standard.
+parser.add_argument('--rand_qtable', '-rq', \
+    action = 'store_false',\
+    help='Flag for initialization for quantization table. \
+    When true,qtable is uniformly random. When false, \
+    qtable is jpeg standard.\
+    Bool. Default: True.')
 
 # Flag for feature extracting. When False, we finetune the whole model, 
 #   when True we only update the reshaped layer params
-feature_extract = False
+#feature_extract = False
+parser.add_argument('--feature_extract', '-f', \
+    action = 'store_true',\
+    help = 'Flag for feature extracting. When False, \
+    we finetune the whole model.\
+    Bool. Default: False.')
 
+# Flag for printing trained quantization matrix
+parser.add_argument('--qtable', '-q', \
+    action = 'store_true',\
+    help = 'Flag for print quantization matrix. \
+    Bool. Default: False.')   
+
+#Flag for visualizing the jpeg layer
+parser.add_argument('--visualize', '-v',\
+    action = 'store_false',\
+    help = 'Flag for visualizing the jpeg layer. \
+    Bool. Default: True')
+
+#parse the inputs
+args = parser.parse_args()
 
 ######################################################################
 # Helper Functions
@@ -166,7 +221,6 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             for inputs, labels in dataloaders[phase]:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-                print(labels)
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
@@ -421,7 +475,7 @@ def set_parameter_requires_grad(model, feature_extracting):
 # 
 
 
-def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = False, use_pretrained=True):
+def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = False, rand_qtable = True, use_pretrained=True):
     # Initialize these variables which will be set in this if statement. Each of these
     #   variables is model specific.
     model_ft = None
@@ -490,11 +544,15 @@ def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = 
         exit()
     
     if add_jpeg_layer:
-        model_ft = nn.Sequential(JpegLayer(),model_ft)
+        model_ft = nn.Sequential(JpegLayer( \
+                   rand_qtable = rand_qtable),\
+                   model_ft)
     return model_ft, input_size
 
+
+
 # Initialize the model for this run
-model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer, use_pretrained=True)
+model_ft, input_size = initialize_model(args.model_name, args.num_classes, args.feature_extract, args.add_jpeg_layer, args.rand_qtable, use_pretrained=True)
 
 # Print the model we just instantiated
 print(model_ft) 
@@ -515,7 +573,7 @@ print(model_ft)
 data_transforms = {
     'train': transforms.Compose([
         transforms.RandomResizedCrop(input_size),
-        #transforms.RandomHorizontalFlip(),
+        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         #transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
@@ -530,16 +588,9 @@ data_transforms = {
 print("Initializing Datasets and Dataloaders...")
 
 # Create training and validation datasets
-image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'val']}
-# Create training and validation dataloaders
-print(image_datasets['train'])
+image_datasets = {x: datasets.ImageFolder(os.path.join(args.data_dir, x), data_transforms[x]) for x in ['train', 'val']}
 
-#dist.init_process_group(backend='gloo', init_method='tcp://224.66.41.62:23456', world_size=1)
-#samplers = torch.utils.data.distributed.DistributedSampler(image_datasets['train'])
-#prinf("helkkjlds")
-#samplers = {x: torch.utils.data.distributed.DistributedSampler(image_datasets[x]) for x in ['train','val']}
-
-dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=False, num_workers=4) for x in ['train', 'val']}
+dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=args.batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
 
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -575,7 +626,7 @@ model_ft = model_ft.to(device)
 #  is True.
 params_to_update = model_ft.parameters()
 print("Params to learn:")
-if feature_extract:
+if args.feature_extract:
     params_to_update = []
     for name,param in model_ft.named_parameters():
         if param.requires_grad == True:
@@ -606,17 +657,23 @@ optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
 criterion = nn.CrossEntropyLoss()
 
 # Train and evaluate
-model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs, is_inception=(model_name=="inception"))
+model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=args.num_epochs, is_inception=(args.model_name=="inception"))
 
 
-#print the trained matrix
-for name,param in model_ft.named_parameters():
-    if param.requires_grad == True and\
-            name == "0.quantize":
-        print(param.data*255)
+#print the trained quantization matrix
+if args.qtable:
+    print('--------- the trained quantize table ---------')
+    for name,param in model_ft.named_parameters():
+        if param.requires_grad == True and\
+                name == "0.quantize":
+            print('Y',param.data[0]*255)
+            print('Cb',param.data[1]*255)
+            print('Cr',param.data[2]*255)
 
 
-# Let's visualize feature maps
+
+
+# Let's visualize feature maps after jpeg layer
 activation = {}
 def get_activation(name):
     def hook(model, input, output):
@@ -637,12 +694,15 @@ output = model_ft(data.to(device))
 f2 = activation['0.JpegLayer'].squeeze().cpu().data.numpy()
 f2 = (np.transpose(f2, (1,2,0))*255).astype(np.uint8)
 axarr[1].imshow(f2)
-plt.show()
-#psnr
+if args.visualize: 
+    plt.show()
+
+#save images
 from psnr import psnr, compressJ, save
 from PIL import Image
 save(f1, "org.bmp")
 save(f2, "myJpeg.jpg")
+
 ###############################
 ##### standard python jpeg ####
 ###############################
@@ -658,43 +718,47 @@ save(f2, "myJpeg.jpg")
 #print("PSNR - my jpeg: ", psnr(f2[0],f1[0]))
 #print("PSNR - PIL jpeg", psnr(im[0], f1[0]))
 #print("PSNR - my vs. PIL", psnr(im[0], f2[0]))
-######################################################################
-# Comparison with Model Trained from Scratch
-# ------------------------------------------
-# 
-# Just for fun, lets see how the model learns if we do not use transfer
-# learning. The performance of finetuning vs. feature extracting depends
-# largely on the dataset but in general both transfer learning methods
-# produce favorable results in terms of training time and overall accuracy
-# versus a model trained from scratch.
-# 
-'''
-# Initialize the non-pretrained version of the model used for this run
-scratch_model,_ = initialize_model(model_name, num_classes, feature_extract=False, use_pretrained=False)
-scratch_model = scratch_model.to(device)
-scratch_optimizer = optim.SGD(scratch_model.parameters(), lr=0.001, momentum=0.9)
-scratch_criterion = nn.CrossEntropyLoss()
-_,scratch_hist = train_model(scratch_model, dataloaders_dict, scratch_criterion, scratch_optimizer, num_epochs=num_epochs, is_inception=(model_name=="inception"))
 
-# Plot the training curves of validation accuracy vs. number 
-#  of training epochs for the transfer learning method and
-#  the model trained from scratch
-ohist = []
-shist = []
 
-ohist = [h.cpu().numpy() for h in hist]
-shist = [h.cpu().numpy() for h in scratch_hist]
 
-plt.title("Validation Accuracy vs. Number of Training Epochs")
-plt.xlabel("Training Epochs")
-plt.ylabel("Validation Accuracy")
-plt.plot(range(1,num_epochs+1),ohist,label="Pretrained")
-plt.plot(range(1,num_epochs+1),shist,label="Scratch")
-plt.ylim((0,1.))
-plt.xticks(np.arange(1, num_epochs+1, 1.0))
-plt.legend()
-plt.show()
-
+#######################################################################
+## Comparison with Model Trained from Scratch
+## ------------------------------------------
+## 
+## Just for fun, lets see how the model learns if we do not use transfer
+## learning. The performance of finetuning vs. feature extracting depends
+## largely on the dataset but in general both transfer learning methods
+## produce favorable results in terms of training time and overall accuracy
+## versus a model trained from scratch.
+## 
+#
+#
+## Initialize the non-pretrained version of the model used for this run
+#scratch_model,_ = initialize_model(model_name, num_classes, feature_extract=False, use_pretrained=False)
+#scratch_model = scratch_model.to(device)
+#scratch_optimizer = optim.SGD(scratch_model.parameters(), lr=0.001, momentum=0.9)
+#scratch_criterion = nn.CrossEntropyLoss()
+#_,scratch_hist = train_model(scratch_model, dataloaders_dict, scratch_criterion, scratch_optimizer, num_epochs=num_epochs, is_inception=(model_name=="inception"))
+#
+## Plot the training curves of validation accuracy vs. number 
+##  of training epochs for the transfer learning method and
+##  the model trained from scratch
+#ohist = []
+#shist = []
+#
+#ohist = [h.cpu().numpy() for h in hist]
+#shist = [h.cpu().numpy() for h in scratch_hist]
+#
+#plt.title("Validation Accuracy vs. Number of Training Epochs")
+#plt.xlabel("Training Epochs")
+#plt.ylabel("Validation Accuracy")
+#plt.plot(range(1,num_epochs+1),ohist,label="Pretrained")
+#plt.plot(range(1,num_epochs+1),shist,label="Scratch")
+#plt.ylim((0,1.))
+#plt.xticks(np.arange(1, num_epochs+1, 1.0))
+#plt.legend()
+#plt.show()
+#
 
 ######################################################################
 # Final Thoughts and Where to Go Next
@@ -713,4 +777,4 @@ plt.show()
 #    or trace it using the hybrid frontend for more speed and optimization
 #    opportunities.
 # 
-'''
+
