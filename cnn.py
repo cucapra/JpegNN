@@ -637,7 +637,7 @@ output = model_ft(data.to(device))
 f2 = activation['0.JpegLayer'].squeeze().cpu().data.numpy()
 f2 = (np.transpose(f2, (1,2,0))*255).astype(np.uint8)
 axarr[1].imshow(f2)
-#plt.show()
+plt.show()
 #psnr
 from psnr import psnr, compressJ, save
 from PIL import Image

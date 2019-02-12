@@ -43,18 +43,21 @@ class JpegLayer(torch.nn.Module):
         rgb = 255*input
         ycbcr = self.__rgb2ycbcr(rgb)
         #mean filter subsample
-        sample = self.__subsample(ycbcr) - 128
+        samples = self.__subsample(ycbcr) 
+        
+        samples2 = []
+        for i in range(0,3):
         #blocking
-        sts1 = torch.stack((torch.split(sample, self.bs, 2)), 1)
-        sts2 = torch.stack((torch.split(sts1, self.bs, 4)), 2)
+            sts1 = torch.stack((torch.split(samples[i]-128, self.bs, 1)), 1)
+            sts2 = torch.stack((torch.split(sts1, self.bs, 3)), 2)
         #dct
-        dcts = torch.matmul(torch.matmul(self.dctmtx,sts2),self.dctmtx.t())
-        #dcts = dct.dct_2d(sts2)
+            dcts = torch.matmul(torch.matmul(self.dctmtx,sts2),self.dctmtx.t())
+            #dcts = dct.dct_2d(sts2)
         #quantization
-        comp = torch.round(dcts/
+            comp = torch.round(dcts/
             torch.round( torch.clamp(
             torch.round( (
-            torch.round(self.quantize*255)
+            torch.round(self.quantize[0]*255)
             *self.quality+50)/100)
             ,min=1,max=255) ) 
             )
@@ -67,19 +70,21 @@ class JpegLayer(torch.nn.Module):
             #) )
         
         #decompression
-        nograd_quantize = \
+            nograd_quantize = \
             torch.round(torch.clamp(
             torch.round( (
-            torch.round(self.quantize.clone()*255)
+            torch.round(self.quantize[0].clone()*255)
             *self.quality+50 ) /100)
             ,min=1,max=255
             ) )
-        decomp =  torch.round(comp*nograd_quantize)
-        idcts = torch.matmul(torch.matmul(self.dctmtx.t(), decomp), self.dctmtx)
-        #idcts = dct.idct_2d(decomp)
-        sts3 = torch.cat(torch.unbind(idcts, 2), 4)
-        ycbcr2 = torch.cat(torch.unbind(sts3, 1), 2)
-        
+            decomp =  torch.round(comp*nograd_quantize)
+            idcts = torch.matmul(torch.matmul(self.dctmtx.t(), decomp), self.dctmtx)
+            #idcts = dct.idct_2d(decomp)
+            sts3 = torch.cat(torch.unbind(idcts, 2), 3)
+            sts4 = torch.cat(torch.unbind(sts3, 1), 1)
+            print('sts4',sts4.size())
+            samples2.append(sts4)
+        ycbcr2 = self.__upsample(samples2)
         y_pred = torch.round(self.__ycbcr2rgb(ycbcr2+128))
 #        a,b,c,d = y_pred.shape
 #        for i in range(a):
@@ -116,18 +121,34 @@ class JpegLayer(torch.nn.Module):
                     dct_mtx[i][j] = math.sqrt(2/bs) * \
                     math.cos((math.pi*(2*j+1)*i)/(2*bs)) 
         return dct_mtx.type(torch.cuda.FloatTensor)
-    
-    def __subsample(self, im, r=2, c=2):
-        permute = im.permute(1,0,2,3)
-        sts1 = torch.stack((torch.split(permute, r, 2)), 2)
-        sts2 = torch.stack((torch.split(sts1, c, 4)), 3)
-        a,b,c,d,e,f = sts2.shape#batch, channel, w/r,h/c,r,c
+    def __upsample(self, samples, row=2, col=2):
+        upsamples = []
+        upsamples.append(samples[0])
+        a,b,c = samples[1].shape #batches, w/r,h/c
         for i in range(1,3):
-            mean = torch.mean(sts2[i].view(b,c,d,-1).float(),3,keepdim=True)
-            sts2[i] = mean.repeat(1,1,1,4).view(b,c,d,e,f)
-        sts3 = torch.cat(torch.unbind(sts2, 3), 4)
-        sts4 = torch.cat(torch.unbind(sts3, 2), 2)
-        return sts4.permute(1,0,2,3)
+            upsample = torch.unsqueeze(samples[i],3)
+            print(upsample.size())
+            upsample = upsample.repeat(1,1,1,4)
+            upsample = upsample.view(a,b,c,row,col)
+            sts1 = torch.cat(torch.unbind(upsample, 2),3)
+            sts2 = torch.cat(torch.unbind(sts1, 1),1)
+            print(sts2.size())
+            upsamples.append(sts2)
+        sts3 = torch.stack(upsamples)
+        return sts3.permute(1,0,2,3)
+    def __subsample(self, im, row=2, col=2):
+        permute = im.permute(1,0,2,3)
+        
+        means = []
+        means.append(permute[0])
+        for i in range(1,3):
+            sts1 = torch.stack((torch.split(permute[i], row, 1)), 1)
+            sts2 = torch.stack((torch.split(sts1, col, 3)), 2)
+            a,b,c,d,e= sts2.shape#batch,w/r,h/c,r,c
+            mean = torch.mean(sts2.view(a,b,c,-1).float(),3)
+            means.append(mean)
+             
+        return means # sts4.permute(1,0,2,3)
         
 
     def __rgb2ycbcr(self,rgb):

@@ -10,9 +10,7 @@ args = parser.parse_args()
 
 
 def psnr(compressed,origin):
-
     mse = 0
-
     for rownum in range(len(compressed)):
        for colnum in range(len(compressed[rownum])):
            mse += math.pow((origin[rownum][colnum] - compressed[rownum][colnum]),2)
@@ -46,7 +44,6 @@ if args.comparison:
     my_im = np.array(my_im,np.int16).transpose(2,0,1)
     lib_im = Image.open( 'libJpeg.jpg' )
     lib_im = np.array(lib_im, np.int32).transpose(2,0,1)
-    #for i in range(lib_im.shape[1]):
     print(my_im[0])
     print(lib_im[0])
     print("===")
