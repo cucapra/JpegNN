@@ -1,14 +1,35 @@
+#JpegNN
 A naive framework of Jpeg compression layer added to some nenural networks.
 
-- Todo 
+##Dependency
+Pytorch, Numpy, Argparse, PIL, Matplotlib
 
-unit test: 
-1. single image output
-2. psnr to each step: rgb2ycbcr, dct, quantize
+##Usage
+cnn.py 
+- A normal neural network framework. One can choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]. (Actually inception is not finished because I haven't add padding yet.)
+- One can choose to add jpeg layer by setting the add\_jpeg\_layer flag
 
-backward propagation:
-1. should not depends on decompression(deepcopy?)
+jpeg\_layer.py
+- The layer of jpeg implementation. 
+- It contains rgb2ycbcr, subsampling(2x2 box filter), dct2, quantization(qtable as parameter); quantization back(not parameter), idct2, upsampling(2x2 duplicating), ycbcr2rgb
+
+psnr.py
+- For some simple testing on psnr between libjpeg and feature map after jpeg\_layer.
+
+## Todo 
+Change loss function:
+- Modifying loss function so that we can keep qtable magnitude as small as possible.
+
+Test on uncompress data:
+- waiting for datasets
+
+Jpeg verification:
+- look into libjpeg at https://github.com/LuaDist/libjpeg. Currently the compressions are very close, but still not the same. 
+
+
+unit test for backward propagation:
+- should not depends on decompression(not sure how to test that yet)
 
 optimization (far in the future):
-1. the code is currently ugly, make it beautiful(some day)
-2. speed up
+- the code is currently ugly, make it beautiful(some day)
+- speed up
