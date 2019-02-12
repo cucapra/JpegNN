@@ -19,6 +19,8 @@ psnr.py
 ## Todo 
 Change loss function:
 - Modifying loss function so that we can keep qtable magnitude as small as possible.
+- scaling factor: a*loss + b*1/magnitude
+- regularization tech: look it up
 
 Test on uncompress data:
 - waiting for datasets
