@@ -82,7 +82,6 @@ class JpegLayer(torch.nn.Module):
             #idcts = dct.idct_2d(decomp)
             sts3 = torch.cat(torch.unbind(idcts, 2), 3)
             sts4 = torch.cat(torch.unbind(sts3, 1), 1)
-            print('sts4',sts4.size())
             samples2.append(sts4)
         ycbcr2 = self.__upsample(samples2)
         y_pred = torch.round(self.__ycbcr2rgb(ycbcr2+128))
@@ -127,12 +126,10 @@ class JpegLayer(torch.nn.Module):
         a,b,c = samples[1].shape #batches, w/r,h/c
         for i in range(1,3):
             upsample = torch.unsqueeze(samples[i],3)
-            print(upsample.size())
             upsample = upsample.repeat(1,1,1,4)
             upsample = upsample.view(a,b,c,row,col)
             sts1 = torch.cat(torch.unbind(upsample, 2),3)
             sts2 = torch.cat(torch.unbind(sts1, 1),1)
-            print(sts2.size())
             upsamples.append(sts2)
         sts3 = torch.stack(upsamples)
         return sts3.permute(1,0,2,3)
