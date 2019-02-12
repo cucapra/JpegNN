@@ -42,9 +42,11 @@ Finetuning Torchvision Models
 
 from __future__ import print_function 
 from __future__ import division
+import PIL
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed as dist
 import numpy as np
 import torchvision
 from torchvision import datasets, models, transforms
@@ -89,13 +91,13 @@ print("Torchvision Version: ",torchvision.__version__)
 
 # Top level data directory. Here we assume the format of the directory conforms 
 #   to the ImageFolder structure
-data_dir = "./hymenoptera_data"
+data_dir = "../jennaPNGSet/"
 
 # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]
 model_name = "squeezenet"
 
 # Number of classes in the dataset
-num_classes = 2
+num_classes = 3
 
 # Batch size for training (change depending on how much memory you have)
 batch_size = 8
@@ -164,7 +166,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             for inputs, labels in dataloaders[phase]:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-
+                print(labels)
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
@@ -513,12 +515,12 @@ print(model_ft)
 data_transforms = {
     'train': transforms.Compose([
         transforms.RandomResizedCrop(input_size),
-        transforms.RandomHorizontalFlip(),
+        #transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         #transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
     'val': transforms.Compose([
-        transforms.Resize(input_size),
+        transforms.Resize(256),
         transforms.CenterCrop(input_size),
         transforms.ToTensor(),
         #transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -530,7 +532,14 @@ print("Initializing Datasets and Dataloaders...")
 # Create training and validation datasets
 image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'val']}
 # Create training and validation dataloaders
-dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
+print(image_datasets['train'])
+
+#dist.init_process_group(backend='gloo', init_method='tcp://224.66.41.62:23456', world_size=1)
+#samplers = torch.utils.data.distributed.DistributedSampler(image_datasets['train'])
+#prinf("helkkjlds")
+#samplers = {x: torch.utils.data.distributed.DistributedSampler(image_datasets[x]) for x in ['train','val']}
+
+dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=False, num_workers=4) for x in ['train', 'val']}
 
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -628,21 +637,27 @@ output = model_ft(data.to(device))
 f2 = activation['0.JpegLayer'].squeeze().cpu().data.numpy()
 f2 = (np.transpose(f2, (1,2,0))*255).astype(np.uint8)
 axarr[1].imshow(f2)
-plt.show()
+#plt.show()
 #psnr
-from psnr import psnr
+from psnr import psnr, compressJ, save
 from PIL import Image
-im = Image.fromarray(f1, 'RGB')
-im.save('to_jpeg.png','JPEG')
-im = Image.open("to_jpeg.png")
-im = np.array(im, np.int16).transpose(2,0,1)
-
-f1 = np.array(f1,np.int16).transpose(2,0,1)
-f2 = np.array(f2,np.int16).transpose(2,0,1)
-print("compression results!")
-print("PSNR - my jpeg: ", psnr(f2[0],f1[0]))
-print("PSNR - PIL jpeg", psnr(im[0], f1[0]))
-print("PSNR - my vs. PIL", psnr(im[0], f2[0]))
+save(f1, "org.bmp")
+save(f2, "myJpeg.jpg")
+###############################
+##### standard python jpeg ####
+###############################
+#im = compressJ(f1,"toJpeg.jpg")
+#im = np.array(im, np.int16).transpose(2,0,1)
+#
+##############################
+#####         psnr        #### 
+##############################
+#f1 = np.array(f1,np.int16).transpose(2,0,1)
+#f2 = np.array(f2,np.int16).transpose(2,0,1)
+#print("compression results!")
+#print("PSNR - my jpeg: ", psnr(f2[0],f1[0]))
+#print("PSNR - PIL jpeg", psnr(im[0], f1[0]))
+#print("PSNR - my vs. PIL", psnr(im[0], f2[0]))
 ######################################################################
 # Comparison with Model Trained from Scratch
 # ------------------------------------------
