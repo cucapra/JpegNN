@@ -231,6 +231,16 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                     # Special case for inception because in training it has an auxiliary output. In train
                     #   mode we calculate the loss by summing the final output and the auxiliary output
                     #   but in testing we only consider the final output.
+                    
+                    #add regularization
+                    l1_crit = nn.L1Loss(size_average=False)
+                    reg_loss = 0
+                    factor = 0.005
+                    target = torch.zeros(3,8,8).cuda()
+                    for name, param in model.named_parameters():
+                        if name == "0.quantize":
+                            reg_loss += l1_crit(param,target)
+
                     if is_inception and phase == 'train':
                         # From https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
                         outputs, aux_outputs = model(inputs)
@@ -241,15 +251,17 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                         outputs = model(inputs)
                         loss = criterion(outputs, labels)
 
+                    loss += (factor / reg_loss)
+
                     _, preds = torch.max(outputs, 1)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
-                    #for name, param in model.named_parameters():
-                        #if name=="0.quantize":
-                        #    print(name, param.data)
+                        for name, param in model.named_parameters():
+                            if name == "0.quantize":
+                                print(param.grad)
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
@@ -661,6 +673,8 @@ model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft
 
 
 #print the trained quantization matrix
+name, param = model_ft[0]
+print(name, param)
 if args.qtable:
     print('--------- the trained quantize table ---------')
     for name,param in model_ft.named_parameters():

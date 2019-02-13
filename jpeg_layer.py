@@ -5,6 +5,7 @@ import numpy as np
 from torch.nn.parameter import Parameter
 from torch.nn.modules.module import Module
 import torch_dct as dct
+import gradient
 
 class JpegLayer(torch.nn.Module):
     def __init__(self, rand_qtable = True, block_size = 8, quality = 75):
@@ -28,7 +29,7 @@ class JpegLayer(torch.nn.Module):
         [99,99,99,99,99,99,99,99],
         [99,99,99,99,99,99,99,99]     
         ])/255
-        if rand_qtable:
+        if rand_qtable == False:
             quantize = np.array([quantizeY, quantizeC, quantizeC])
             self.quantize = torch.nn.Parameter(torch.cuda.FloatTensor(quantize))
         else:
@@ -39,6 +40,9 @@ class JpegLayer(torch.nn.Module):
         self.quality = self.__scale_quality(quality)
         self.bs = block_size
         self.dctmtx = self.__dctmtx(self.bs)
+        #gradients
+        self.round = gradient.RoundNoGradient
+        self.clamp = gradient.ClampNoGradient 
     def forward(self, input):
         
         #preprocessing
@@ -56,37 +60,29 @@ class JpegLayer(torch.nn.Module):
             dcts = torch.matmul(torch.matmul(self.dctmtx,sts2),self.dctmtx.t())
             #dcts = dct.dct_2d(sts2)
         #quantization
-            comp = torch.round(dcts/
-            torch.round( torch.clamp(
-            torch.round( (
-            torch.round(self.quantize[0]*255)
+            comp = self.round.apply(dcts/
+            self.round.apply( self.clamp.apply(
+            self.round.apply( (
+            self.round.apply(self.quantize[0]*255)
             *self.quality+50)/100)
-            ,min=1,max=255) ) 
+            ) ) 
             )
-            #torch.round(dcts/
-            #torch.round(#torch.clamp( 
-            #torch.round( (
-            #torch.round(self.quantize*255)
-            #*self.quality+50 ) /100)
-            #,min=1, max=255)
-            #) )
         
         #decompression
             nograd_quantize = \
-            torch.round(torch.clamp(
-            torch.round( (
-            torch.round(self.quantize[0].clone()*255)
+            self.round.apply(self.clamp.apply(
+            self.round.apply( (
+            self.round.apply(self.quantize[0].clone()*255)
             *self.quality+50 ) /100)
-            ,min=1,max=255
             ) )
-            decomp =  torch.round(comp*nograd_quantize)
+            decomp =  self.round.apply(comp*nograd_quantize)
             idcts = torch.matmul(torch.matmul(self.dctmtx.t(), decomp), self.dctmtx)
             #idcts = dct.idct_2d(decomp)
             sts3 = torch.cat(torch.unbind(idcts, 2), 3)
             sts4 = torch.cat(torch.unbind(sts3, 1), 1)
             samples2.append(sts4)
         ycbcr2 = self.__upsample(samples2)
-        y_pred = torch.round(self.__ycbcr2rgb(ycbcr2+128))
+        y_pred = self.round.apply(self.__ycbcr2rgb(ycbcr2+128))
 #        a,b,c,d = y_pred.shape
 #        for i in range(a):
 #            for j in range(b):
@@ -122,6 +118,7 @@ class JpegLayer(torch.nn.Module):
                     dct_mtx[i][j] = math.sqrt(2/bs) * \
                     math.cos((math.pi*(2*j+1)*i)/(2*bs)) 
         return dct_mtx.type(torch.cuda.FloatTensor)
+
     def __upsample(self, samples, row=2, col=2):
         upsamples = []
         upsamples.append(samples[0])
@@ -135,6 +132,7 @@ class JpegLayer(torch.nn.Module):
             upsamples.append(sts2)
         sts3 = torch.stack(upsamples)
         return sts3.permute(1,0,2,3)
+
     def __subsample(self, im, row=2, col=2):
         permute = im.permute(1,0,2,3)
         
@@ -158,7 +156,7 @@ class JpegLayer(torch.nn.Module):
         ycbcr = torch.matmul(ycbcr, xform.t())
         ycbcr[:,:,:,[1,2]] += 128
         #put mask
-        ycbcr = torch.clamp(ycbcr, min=0, max=255)
+        ycbcr = self.clamp.apply(ycbcr)
         ycbcr = ycbcr.permute(0,3,1,2)
         return ycbcr
 
@@ -171,7 +169,7 @@ class JpegLayer(torch.nn.Module):
         rgb[:,:,:,[1,2]] -= 128
         rgb = torch.matmul(rgb, xform.t())
         #put mask
-        rgb = torch.clamp(rgb, min=0, max=255)
+        rgb = self.clamp.apply(rgb)
         
         rgb = rgb.permute(0,3,1,2)
         return rgb
