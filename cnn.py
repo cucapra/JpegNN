@@ -97,9 +97,9 @@ parser = argparse.ArgumentParser(description = \
 #   to the ImageFolder structure
 #data_dir = "./hymenoptera_data"
 parser.add_argument('--data_dir', '-d', type=str,\
-    default='./hymenoptera_data', \
+    default='/data/jenna/data/', \
     help='Directory of the input data. \
-    String. Default: ./hymenoptera_data')
+    String. Default: /data/jenna/data/')
 # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]
 #model_name = "squeezenet"
 parser.add_argument('--model_name', '-m', type=str,\
@@ -125,7 +125,7 @@ parser.add_argument('--batch_size', '-b', type=int,\
 
 # Number of epochs to train for 
 #num_epochs = 25
-parser.add_argument('--num_epochs', '-ep', type=int,\
+parser.add_argument('-ep', '--num_epochs', type=int,\
     default = 25,\
     help = 'Number of echos to train for. \
     Integer. Default:25')
@@ -165,10 +165,17 @@ parser.add_argument('--visualize', '-v',\
     action = 'store_false',\
     help = 'Flag for visualizing the jpeg layer. \
     Bool. Default: True')
-
+#Flag for regularize the magnitude of quantization table
+#regularize = True
+parser.add_argument('--regularize','-r',\
+    action = 'store_false',\
+    help = 'Flag for regularize the magnitude of \
+    quantizaiton table. Without the term, the quantization \
+    table goes to 0 \
+    Bool. Default: True')
 #parse the inputs
-args = parser.parse_args()
-
+args,unparsed = parser.parse_known_args()
+print(args)
 ######################################################################
 # Helper Functions
 # ----------------
@@ -233,13 +240,18 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                     #   but in testing we only consider the final output.
                     
                     #add regularization
-                    l1_crit = nn.L1Loss(size_average=False)
+                    
                     reg_loss = 0
-                    factor = 0.005
-                    target = torch.zeros(3,8,8).cuda()
-                    for name, param in model.named_parameters():
-                        if name == "0.quantize":
-                            reg_loss += l1_crit(param,target)
+                    if args.regularize:
+                        reg_crit = nn.MSELoss(size_average=False)
+                        factor = 1000
+                        target = torch.zeros(3,8,8).cuda()
+                        for name, param in model.named_parameters():
+                            if name == "0.quantize":
+                                reg_loss += reg_crit(param,target)/inputs.size(0)
+                                print('reg loss',reg_loss)
+                                reg_loss = 1/reg_loss * factor
+                                break
 
                     if is_inception and phase == 'train':
                         # From https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
@@ -250,8 +262,9 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                     else:
                         outputs = model(inputs)
                         loss = criterion(outputs, labels)
-
-                    loss += (factor / reg_loss)
+                    
+                    loss += reg_loss
+                    print(loss, reg_loss)
 
                     _, preds = torch.max(outputs, 1)
 
@@ -261,7 +274,17 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                         optimizer.step()
                         for name, param in model.named_parameters():
                             if name == "0.quantize":
-                                print(param.grad)
+                                #print(param)
+                                param.data = torch.round(param.data * 255)/255
+                                param.data.clamp_(1/255,1)
+                                print(param.data*255)
+                         #   if "features.0.weight" in name:
+                         #       print("1.features.0.w gradient!!!!!")
+                         #       print(param.grad)
+                         #       print("parameters!!!!!")
+                         #       print(param)
+                                break
+
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
@@ -636,21 +659,26 @@ model_ft = model_ft.to(device)
 #  doing feature extract method, we will only update the parameters
 #  that we have just initialized, i.e. the parameters with requires_grad
 #  is True.
-params_to_update = model_ft.parameters()
+params_to_update = [] #model_ft.parameters()
+params_quantize = []
 print("Params to learn:")
-if args.feature_extract:
-    params_to_update = []
-    for name,param in model_ft.named_parameters():
-        if param.requires_grad == True:
+#if args.feature_extract:
+#    params_to_update = []
+for name,param in model_ft.named_parameters():
+    if param.requires_grad == True:
+        if name == "0.quantize":
+            params_quantize.append(param)
+        else:
             params_to_update.append(param)
-            print("\t",name)
-else:
-    for name,param in model_ft.named_parameters():
-        if param.requires_grad == True:
-            print("\t",name)
+        print("\t",name)
+#else:
+#    for name,param in model_ft.named_parameters():
+#        if param.requires_grad == True:
+#            print("\t",name)
 
 # Observe that all parameters are being optimized
-optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
+optimizer_ft = optim.SGD([{'params': params_to_update},\
+        {'params': params_quantize, 'lr': 0.0005}], lr=0.001, momentum=0.9)
 
 
 ######################################################################
@@ -673,8 +701,6 @@ model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft
 
 
 #print the trained quantization matrix
-name, param = model_ft[0]
-print(name, param)
 if args.qtable:
     print('--------- the trained quantize table ---------')
     for name,param in model_ft.named_parameters():
@@ -688,34 +714,36 @@ if args.qtable:
 
 
 # Let's visualize feature maps after jpeg layer
-activation = {}
 def get_activation(name):
-    def hook(model, input, output):
-        activation[name] = output.detach()
-    return hook
+   def hook(model, input, output):
+       activation[name] = output.detach()
+   return hook
 
-model_ft[0].register_forward_hook(get_activation('0.JpegLayer'))
-data, _ = image_datasets["train"][0]
-
-fig, axarr = plt.subplots(2)
-f1 = data.cpu().data.numpy()
-f1 = (np.transpose(f1,(1,2,0))*255).astype(np.uint8)
-axarr[0].imshow(f1)
-
-data.unsqueeze_(0)
-output = model_ft(data.to(device))
-
-f2 = activation['0.JpegLayer'].squeeze().cpu().data.numpy()
-f2 = (np.transpose(f2, (1,2,0))*255).astype(np.uint8)
-axarr[1].imshow(f2)
-if args.visualize: 
-    plt.show()
-
-#save images
-from psnr import psnr, compressJ, save
-from PIL import Image
-save(f1, "org.bmp")
-save(f2, "myJpeg.jpg")
+if args.add_jpeg_layer:
+    activation = {}
+    
+    model_ft[0].register_forward_hook(get_activation('0.JpegLayer'))
+    data, _ = image_datasets["train"][0]
+    
+    fig, axarr = plt.subplots(2)
+    f1 = data.cpu().data.numpy()
+    f1 = (np.transpose(f1,(1,2,0))*255).astype(np.uint8)
+    axarr[0].imshow(f1)
+    
+    data.unsqueeze_(0)
+    output = model_ft(data.to(device))
+    
+    f2 = activation['0.JpegLayer'].squeeze().cpu().data.numpy()
+    f2 = (np.transpose(f2, (1,2,0))*255).astype(np.uint8)
+    axarr[1].imshow(f2)
+    if args.visualize: 
+        plt.show()
+    
+    #save images
+    from psnr import psnr, compressJ, save
+    from PIL import Image
+    save(f1, "org.bmp")
+    save(f2, "myJpeg.jpg")
 
 ###############################
 ##### standard python jpeg ####

@@ -42,47 +42,60 @@ class JpegLayer(torch.nn.Module):
         self.dctmtx = self.__dctmtx(self.bs)
         #gradients
         self.round = gradient.RoundNoGradient
-        self.clamp = gradient.ClampNoGradient 
-    def forward(self, input):
+        self.clamp = gradient.ClampNoGradient
+        self.clamp1 = gradient.ClampNoGradient
+
+        #tmp = torch.cuda.FloatTensor([0.5])
+        #self.tmp = torch.nn.Parameter(tmp)
         
+
+    def forward(self, input):
         #preprocessing
-        rgb = 255*input
-        ycbcr = self.__rgb2ycbcr(rgb)
+        rgb = input
+        #y_pred = rgb/(self.tmp*255)
+        #y_pred = y_pred*(self.tmp.clone()*255)
+
+        ycbcr = self.__rgb2ycbcr(rgb)-128/255
         #mean filter subsample
         samples = self.__subsample(ycbcr) 
         
         samples2 = []
         for i in range(0,3):
         #blocking
-            sts1 = torch.stack((torch.split(samples[i]-128, self.bs, 1)), 1)
+            sts1 = torch.stack((torch.split(samples[i], self.bs, 1)), 1)
             sts2 = torch.stack((torch.split(sts1, self.bs, 3)), 2)
         #dct
             dcts = torch.matmul(torch.matmul(self.dctmtx,sts2),self.dctmtx.t())
             #dcts = dct.dct_2d(sts2)
-        #quantization
-            comp = self.round.apply(dcts/
-            self.round.apply( self.clamp.apply(
-            self.round.apply( (
-            self.round.apply(self.quantize[0]*255)
-            *self.quality+50)/100)
-            ) ) 
-            )
-        
-        #decompression
-            nograd_quantize = \
-            self.round.apply(self.clamp.apply(
-            self.round.apply( (
-            self.round.apply(self.quantize[0].clone()*255)
-            *self.quality+50 ) /100)
-            ) )
-            decomp =  self.round.apply(comp*nograd_quantize)
+            #coef = self.quality/100*self.quantize[i]+0.5/255)
+            comp = self.round.apply(dcts /( (self.quality/100*self.quantize[i]+0.5/255) ) )
+            #comp = self.round.apply(dcts/(self.quantize[i]))
+            decomp = comp*( (self.quality/100*self.quantize[i].clone()+0.5/255))
+    #    #quantization
+    #        comp = self.round.apply(dcts/
+    #        self.round.apply( self.clamp1.apply(
+    #        self.round.apply( (
+    #        self.round.apply(self.quantize[i])
+    #        *self.quality+50)/100)
+    #        ) ) 
+    #        )
+    #    
+    #    #decompression
+    #        nograd_quantize = \
+    #        self.round.apply(self.clamp1.apply(
+    #        self.round.apply( (
+    #        self.round.apply(self.quantize[i].clone())
+    #        *self.quality+50 ) /100)
+    #        ) )
+    #        decomp =  self.round.apply(comp*nograd_quantize)
             idcts = torch.matmul(torch.matmul(self.dctmtx.t(), decomp), self.dctmtx)
             #idcts = dct.idct_2d(decomp)
             sts3 = torch.cat(torch.unbind(idcts, 2), 3)
             sts4 = torch.cat(torch.unbind(sts3, 1), 1)
             samples2.append(sts4)
         ycbcr2 = self.__upsample(samples2)
-        y_pred = self.round.apply(self.__ycbcr2rgb(ycbcr2+128))
+        #y_pred = self.round.apply(self.__ycbcr2rgb(ycbcr2+0.5))
+        y_pred = self.__ycbcr2rgb(ycbcr2+128/255)
 #        a,b,c,d = y_pred.shape
 #        for i in range(a):
 #            for j in range(b):
@@ -94,7 +107,8 @@ class JpegLayer(torch.nn.Module):
 #                                rgb[i][j][k][p].item())
 #        
         
-        return y_pred/255
+        return y_pred
+
     def __scale_quality(self, quality=75):
         if(quality<=0):
             quality = 1
@@ -108,8 +122,7 @@ class JpegLayer(torch.nn.Module):
         return quality
         
     def __dctmtx(self, bs=8):
-        #block_size = torch.cuda.FloatTensor(bs)
-        dct_mtx = torch.empty(bs, bs)#.type(torch.cuda.FloatTensor)
+        dct_mtx = torch.empty(bs, bs)
         for j in range(0, bs):
             for i in range(0, bs):
                 if i == 0:
@@ -145,7 +158,7 @@ class JpegLayer(torch.nn.Module):
             mean = torch.mean(sts2.view(a,b,c,-1).float(),3)
             means.append(mean)
              
-        return means # sts4.permute(1,0,2,3)
+        return means 
         
 
     def __rgb2ycbcr(self,rgb):
@@ -154,7 +167,7 @@ class JpegLayer(torch.nn.Module):
                   [-0.168735892 ,- 0.331264108, 0.5],
                   [.5,- 0.418687589, - 0.081312411]])
         ycbcr = torch.matmul(ycbcr, xform.t())
-        ycbcr[:,:,:,[1,2]] += 128
+        ycbcr[:,:,:,[1,2]] += 128/255
         #put mask
         ycbcr = self.clamp.apply(ycbcr)
         ycbcr = ycbcr.permute(0,3,1,2)
@@ -166,7 +179,7 @@ class JpegLayer(torch.nn.Module):
                 [1, - 0.344136286, - 0.714136286], 
                 [1, 1.772, 0]])
 
-        rgb[:,:,:,[1,2]] -= 128
+        rgb[:,:,:,[1,2]] -= 128/255
         rgb = torch.matmul(rgb, xform.t())
         #put mask
         rgb = self.clamp.apply(rgb)
