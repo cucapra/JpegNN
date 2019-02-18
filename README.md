@@ -16,6 +16,9 @@ jpeg\_layer.py
 psnr.py
 - For some simple testing on psnr between libjpeg and feature map after jpeg\_layer.
 
+gradient.py
+- Because torch.clamp() and torch.round() give 0 as gradient, this file is to customize our own clamp and round function
+
 ## Todo 
 Change loss function:
 - Modifying loss function so that we can keep qtable magnitude as small as possible.
