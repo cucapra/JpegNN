@@ -243,14 +243,14 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                     
                     reg_loss = 0
                     if args.regularize:
-                        reg_crit = nn.MSELoss(size_average=False)
+                        reg_crit = nn.L1Loss(size_average=True)
+                        #reg_crit = nn.BCELoss()
                         factor = 1000
-                        target = torch.zeros(3,8,8).cuda()
+                        target = torch.Tensor(3,8,8).cuda()
+                        target.fill_(1)
                         for name, param in model.named_parameters():
                             if name == "0.quantize":
-                                reg_loss += reg_crit(param,target)/inputs.size(0)
-                                print('reg loss',reg_loss)
-                                reg_loss = 1/reg_loss * factor
+                                reg_loss += (factor * reg_crit(param,target) / inputs.size(0))
                                 break
 
                     if is_inception and phase == 'train':
@@ -263,9 +263,9 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                         outputs = model(inputs)
                         loss = criterion(outputs, labels)
                     
-                    loss += reg_loss
-                    print(loss, reg_loss)
-
+                    print('orginal loss', loss,\
+                            'regularization', reg_loss)
+                    loss = loss + reg_loss
                     _, preds = torch.max(outputs, 1)
 
                     # backward + optimize only if in training phase
