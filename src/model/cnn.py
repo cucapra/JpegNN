@@ -145,15 +145,6 @@ parser.add_argument('--rand_qtable', '-rq', \
     qtable is jpeg standard.\
     Bool. Default: True.')
 
-# Flag for feature extracting. When False, we finetune the whole model, 
-#   when True we only update the reshaped layer params
-#feature_extract = False
-parser.add_argument('--feature_extract', '-f', \
-    action = 'store_true',\
-    help = 'Flag for feature extracting. When False, \
-    we finetune the whole model.\
-    Bool. Default: False.')
-
 # Flag for printing trained quantization matrix
 parser.add_argument('--qtable', '-q', \
     action = 'store_true',\
@@ -174,8 +165,15 @@ parser.add_argument('--regularize','-r',\
     table goes to 0 \
     Bool. Default: True')
 
-train_quant_only = True
-
+#Jpeg quality. To calculate a scaling factor for qtable and result in different compression rate. 
+parser.add_argument('--quality', type = int,\
+    default = 50,\
+    help = 'Jpeg quality. It is used to calculate \
+    a quality factor for different compression rate.  \
+    Integer. Default: 50')
+train_quant_only = False
+train_cnn_only = False
+feature_extract = False
 #parse the inputs
 args,unparsed = parser.parse_known_args()
 print(args)
@@ -205,19 +203,19 @@ print(args)
 # training and validation accuracies are printed.
 # 
 
-def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
+def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False, train = True):
     since = time.time()
 
     val_acc_history = []
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
-
+    phases =['val'] if (train==False) else ['train','val']
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
 
         # Each epoch has a training and validation phase
-        for phase in ['train','val']:
+        for phase in phases:
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
@@ -231,7 +229,8 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 # zero the parameter gradients
-                optimizer.zero_grad()
+                if train:
+                    optimizer.zero_grad()
 
                 # forward
                 # track history if only in train
@@ -244,15 +243,13 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                     #add regularization
                     
                     reg_loss = 0
-                    factor = 0.01
+                    factor = 0.1
                     if args.regularize:
                         reg_crit = nn.L1Loss(size_average=True)
-                        #reg_crit = nn.BCELoss()
-                        
                         target = torch.Tensor(3,8,8).cuda()
                         target.fill_(0)
                         for name, param in model.named_parameters():
-                            if name == "0.quantize":
+                            if "quantize" in name:
                                 reg_loss = factor /reg_crit(param,target) * inputs.size(0)
                                 break
 
@@ -266,36 +263,13 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                         outputs = model(inputs)
                         loss = criterion(outputs, labels)
                     
-                    #print('orginal loss', loss)
-                    #print('regularization', reg_loss)
-                    loss =  reg_loss + loss
-                    #print('after reg: ', loss)
+                    loss = reg_loss + loss
                     _, preds = torch.max(outputs, 1)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
-                        quantize = 0
-                        for name, param in model.named_parameters():
-                            if name == "0.quantize":
-                                #print(param.grad[0][0][0])
-
-                                #param.data = torch.round(param.data * 255)/255
-                                #param.data.clamp_(-100/255,100/255)
-                                #quantize = param.data
-                                
-                                #print(param.data[0][0]*255)
-                         #   if "conv1.weight" in name:
-                         #       print("1.features.0.w gradient!!!!!")
-                         #       print(param.grad)
-                         #       print("parameters!!!!!")
-                         #       print(param)
-                           # if name == "0.quantize_nograd":
-                                #param.data = copy.deepcopy(quantize)
-                                #print(param)
-                                break
-
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
@@ -336,10 +310,13 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
 # the other parameters to not require gradients. This will make more sense
 # later.
 # 
-
-def set_parameter_requires_grad(model, feature_extracting):
-    if feature_extracting:
-        for name, param in model.named_parameters():
+def set_parameter_requires_grad(model, first, feature_extract, quant_only=False, cnn_only=False):
+    if first and feature_extract:
+        quant_only = True
+        cnn_only = True
+    for name, param in model.named_parameters():
+        if  (quant_only and 'quantize' not in name) or\
+            (cnn_only and 'quantize' in name):
             param.requires_grad = False
 
 
@@ -521,7 +498,7 @@ def set_parameter_requires_grad(model, feature_extracting):
 # 
 
 
-def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = False, train_quant_only = False, rand_qtable = True, use_pretrained=True):
+def initialize_model(model_name, num_classes, feature_extract = False, add_jpeg_layer = False, train_quant_only = False, train_cnn_only=False, rand_qtable = True, quality = 50, use_pretrained=True):
     # Initialize these variables which will be set in this if statement. Each of these
     #   variables is model specific.
     model_ft = None
@@ -531,7 +508,8 @@ def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = 
         """ Resnet18
         """
         model_ft = models.resnet18(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
+        set_parameter_requires_grad(model_ft,\
+           True, feature_extract)       
         num_ftrs = model_ft.fc.in_features
         model_ft.fc = nn.Linear(num_ftrs, num_classes)
         input_size = 224
@@ -540,7 +518,8 @@ def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = 
         """ Alexnet
         """
         model_ft = models.alexnet(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
+        set_parameter_requires_grad(model_ft,\
+           True, feature_extract)       
         num_ftrs = model_ft.classifier[6].in_features
         model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
         input_size = 224
@@ -549,7 +528,8 @@ def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = 
         """ VGG11_bn
         """
         model_ft = models.vgg11_bn(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
+        set_parameter_requires_grad(model_ft,\
+           True, feature_extract)    
         num_ftrs = model_ft.classifier[6].in_features
         model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
         input_size = 224
@@ -558,15 +538,18 @@ def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = 
         """ Squeezenet
         """
         model_ft = models.squeezenet1_0(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
+        set_parameter_requires_grad(model_ft,\
+           True, feature_extract)       
         model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1,1), stride=(1,1))
         model_ft.num_classes = num_classes
         input_size = 224
+
     elif model_name == "densenet":
         """ Densenet
         """
         model_ft = models.densenet121(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
+        set_parameter_requires_grad(model_ft,\
+           True, feature_extract)       
         num_ftrs = model_ft.classifier.in_features
         model_ft.classifier = nn.Linear(num_ftrs, num_classes) 
         input_size = 224
@@ -576,7 +559,8 @@ def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = 
         Be careful, expects (299,299) sized images and has auxiliary output
         """
         model_ft = models.inception_v3(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
+        set_parameter_requires_grad(model_ft,\
+           True, feature_extract)
         # Handle the auxilary net
         num_ftrs = model_ft.AuxLogits.fc.in_features
         model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
@@ -593,14 +577,18 @@ def initialize_model(model_name, num_classes, feature_extract, add_jpeg_layer = 
         if train_quant_only:
             model_ft.load_state_dict(torch.load("model.final"))
         model_ft = nn.Sequential(JpegLayer( \
-                   rand_qtable = rand_qtable),\
+                   rand_qtable = rand_qtable, cnn_only = train_cnn_only, quality = quality),\
                    model_ft)
+
+    set_parameter_requires_grad(model_ft,\
+           False, feature_extract,
+           train_quant_only, train_cnn_only)
     return model_ft, input_size
 
 
 
 # Initialize the model for this run
-model_ft, input_size = initialize_model(args.model_name, args.num_classes, args.feature_extract, args.add_jpeg_layer, train_quant_only, args.rand_qtable, use_pretrained=True)
+model_ft, input_size = initialize_model(args.model_name, args.num_classes, feature_extract, args.add_jpeg_layer, train_quant_only, train_cnn_only, args.rand_qtable, args.quality, use_pretrained=True)
     
 # Print the model we just instantiated
 print(model_ft) 
@@ -634,15 +622,13 @@ data_transforms = {
 }
 
 print("Initializing Datasets and Dataloaders...")
-
 # Create training and validation datasets
 image_datasets = {x: datasets.ImageFolder(os.path.join(args.data_dir, x), data_transforms[x]) for x in ['train', 'val']}
-
+# Create training and validation dataloaders
 dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=args.batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
 
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
 
 ######################################################################
 # Create the Optimizer
@@ -672,38 +658,24 @@ model_ft = model_ft.to(device)
 #  doing feature extract method, we will only update the parameters
 #  that we have just initialized, i.e. the parameters with requires_grad
 #  is True.
-name_to_update = []
 params_to_update = [] #model_ft.parameters()
-params_quantize = []
-name_quantize = []
 print("Params to learn:")
-#if args.feature_extract:
-#    params_to_update = []
 for name,param in model_ft.named_parameters():
     if param.requires_grad == True:
-        if train_quant_only and \
-         name=="0.quantize":
-            params_quantize.append(param)
-            name_quantize.append(name)
-        else:
-            params_to_update.append(param)
-            name_to_update.append(name)
+        params_to_update.append(param)
+        print('\t',name)
             
-#else:
-#    for name,param in model_ft.named_parameters():
-#        if param.requires_grad == True:
-#            print("\t",name)
-
+iftrain = not(train_quant_only and train_cnn_only)
+optimizer = None
+if iftrain:
 # Observe that all parameters are being optimized
-if train_quant_only:
-    optimizer_ft = optim.Adam(params_quantize, lr = 0.0005)
-    print(name_quantize)
-else:
-    optimizer_ft = optim.SGD(params_to_update, lr = 0.001, momentum=0.9)
-    print(name_to_update)
-       # optim.SGD([{'params': params_to_update},\
+    #if train_quant_only:
+    #optimizer_ft = optim.Adam(params_to_update, lr = 0.0001)
+    #else:
+    optimizer_ft = optim.SGD(params_to_update, lr = 0.0005, momentum=0.9)
+    # optim.SGD([{'params': params_to_update},\
        # {'params': params_quantize, 'lr': 0.005, 'momentum':0.9}], lr=0.0005, momentum=0.9)
-
+print(optimizer_ft)
 
 
 ######################################################################
@@ -722,7 +694,7 @@ else:
 criterion = nn.CrossEntropyLoss()
 
 # Train and evaluate
-model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=args.num_epochs, is_inception=(args.model_name=="inception"))
+model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=args.num_epochs, is_inception=(args.model_name=="inception"), train = iftrain)
 if args.add_jpeg_layer == False:
     torch.save(model_ft.state_dict(), "model.final")
 
@@ -735,6 +707,7 @@ if args.qtable:
             print('Y',param.data[0]*255)
             print('Cb',param.data[1]*255)
             print('Cr',param.data[2]*255)
+            break
 
 
 
@@ -754,18 +727,18 @@ if args.add_jpeg_layer:
 
     data, _ = image_datasets["train"][0]
     
-    fig, axarr = plt.subplots(2)
     f1 = data.cpu().data.numpy()
     f1 = (np.transpose(f1,(1,2,0))*255).astype(np.uint8)
-    axarr[0].imshow(f1)
     
     data.unsqueeze_(0)
     output = model_ft(data.to(device))
     
     f2 = activation['0.JpegLayer'].squeeze().cpu().data.numpy()
     f2 = (np.transpose(f2, (1,2,0))*255).astype(np.uint8)
-    axarr[1].imshow(f2)
     if args.visualize: 
+        fig, axarr = plt.subplots(2)
+        axarr[0].imshow(f1)
+        axarr[1].imshow(f2)
         plt.show()
     
     #save images

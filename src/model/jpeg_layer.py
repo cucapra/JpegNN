@@ -10,7 +10,7 @@ from scipy.fftpack import dct, idct
 import gradient
 
 class JpegLayer(torch.nn.Module):
-    def __init__(self, rand_qtable = True, block_size = 8, quality = 20):
+    def __init__(self, rand_qtable = True, block_size = 8, cnn_only = True, quality = 50):
         super(JpegLayer, self).__init__()
         quantizeY = np.array([
         [16, 11, 10, 16, 24, 40, 51, 61],
@@ -41,22 +41,21 @@ class JpegLayer(torch.nn.Module):
         #self.quantize_nograd = torch.nn.Parameter(self.quantize.clone(), requires_grad = False)
         self.pow = torch.zeros(block_size, block_size).cuda()
         self.sum = torch.zeros(block_size, block_size).cuda()
-        self.quality = self.__scale_quality(quality)
+        self.quality = self.__scale_quality(quality) \
+                        if cnn_only else 100
+        print(self.quality)
         self.bs = block_size
         self.dctmtx = self.__dctmtx(self.bs)
-        #print(self.dctmtx*math.sqrt(8))
         #gradients
         self.round = gradient.RoundNoGradient
         self.clamp = gradient.ClampNoGradient
-        #self.clamp1 = gradient.ClampNoGradient1
-
         
 
     def forward(self, input):
-        #preprocessing
-        #rgb = self.round.apply(input / self.quantize[0][0][3])
-        #return rgb
+        
+        #print(self.quantize*255)
 
+        #preprocessing
         rgb = input
         ycbcr = self.__rgb2ycbcr(rgb)-128/255
         #mean filter subsample
@@ -79,10 +78,11 @@ class JpegLayer(torch.nn.Module):
           #  print(self.sum)
           #  print(self.pow)
           #  print(self.quantize[0]*255)
+            decomp = 0
             if self.training:
-                comp = self.round.apply(dcts/ self.quantize[0])*self.quantize[0]
+                decomp = self.round.apply(dcts/( self.quantize[i]*self.quality/100+0.5/255 ) )*( self.quantize[i]*self.quality/100+0.5/255 )
             else:#eval mode
-                qtable = torch.round(self.quantize[0]*255)/255
+                qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
                 decomp = self.round.apply(dcts/qtable)*qtable
 
                 
