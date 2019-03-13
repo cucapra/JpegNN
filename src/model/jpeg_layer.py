@@ -1,4 +1,7 @@
 # coding=utf-8
+import re
+from ast import literal_eval
+
 import math
 import torch
 import numpy as np
@@ -10,29 +13,13 @@ from scipy.fftpack import dct, idct
 import gradient
 
 class JpegLayer(torch.nn.Module):
-    def __init__(self, rand_qtable = True, block_size = 8, cnn_only = True, quality = 50):
+    def __init__(self, rand_qtable = True, block_size = 8, cnn_only = True,  quality = 50):
         super(JpegLayer, self).__init__()
-        quantizeY = np.array([
-        [16, 11, 10, 16, 24, 40, 51, 61],
-        [12, 12, 14, 19, 26, 58, 60, 55],
-        [14, 13, 16, 24, 40, 57, 69, 56],
-        [14, 17, 22, 29, 51, 87, 80, 62],
-        [18, 22, 37, 56, 68, 109, 103, 77],
-        [24, 35, 55, 64, 81, 104, 113, 92],
-        [49, 64, 78, 87, 103, 121, 120, 101],
-        [72, 92, 95, 98, 112, 100, 103, 99]])/255
-        quantizeC = np.array([
-        [17,18,24,47,99,99,99,99],
-        [18,21,26,66,99,99,99,99],
-        [24,26,56,99,99,99,99,99],
-        [47,66,99,99,99,99,99,99],
-        [99,99,99,99,99,99,99,99],
-        [99,99,99,99,99,99,99,99],
-        [99,99,99,99,99,99,99,99],
-        [99,99,99,99,99,99,99,99]     
-        ])/255
         if rand_qtable == False:
-            quantize = np.array([quantizeY, quantizeC, quantizeC])
+            f = open("qtable.txt","r")
+            a = re.sub('\s+','',f.read())
+            quantize = np.array(literal_eval(a))/255
+            #quantize = np.array([quantizeY, quantizeC, quantizeC])
             self.quantize = torch.nn.Parameter(torch.cuda.FloatTensor(quantize))
         else:
             quantize = torch.cuda.FloatTensor(3, block_size, block_size)
@@ -43,7 +30,6 @@ class JpegLayer(torch.nn.Module):
         self.sum = torch.zeros(block_size, block_size).cuda()
         self.quality = self.__scale_quality(quality) \
                         if cnn_only else 100
-        print(self.quality)
         self.bs = block_size
         self.dctmtx = self.__dctmtx(self.bs)
         #gradients
@@ -52,11 +38,8 @@ class JpegLayer(torch.nn.Module):
         
 
     def forward(self, input):
-        
-        #print(self.quantize*255)
-
         #preprocessing
-        rgb = input
+        rgb = torch.nn.functional.interpolate(input,size=[224,224])
         ycbcr = self.__rgb2ycbcr(rgb)-128/255
         #mean filter subsample
         samples = self.__subsample(ycbcr) 
@@ -82,8 +65,11 @@ class JpegLayer(torch.nn.Module):
             if self.training:
                 decomp = self.round.apply(dcts/( self.quantize[i]*self.quality/100+0.5/255 ) )*( self.quantize[i]*self.quality/100+0.5/255 )
             else:#eval mode
-                qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
+               # qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
+                qtable = (self.quantize[i]*255*self.quality/100 + 0.5)/255
+ 
                 decomp = self.round.apply(dcts/qtable)*qtable
+                #print(decomp)
 
                 
             idcts = torch.matmul(torch.matmul(self.dctmtx.t(), decomp), self.dctmtx)
@@ -104,7 +90,6 @@ class JpegLayer(torch.nn.Module):
 #                            y_pred[i][j][k][p].item(),\
 #                                rgb[i][j][k][p].item())
 #        
-        
         return y_pred
 
     def __scale_quality(self, quality=75):

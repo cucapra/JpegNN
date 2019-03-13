@@ -42,6 +42,7 @@ Finetuning Torchvision Models
 
 from __future__ import print_function 
 from __future__ import division
+import sys
 import PIL
 import torch
 import torch.nn as nn
@@ -171,8 +172,10 @@ parser.add_argument('--quality', type = int,\
     help = 'Jpeg quality. It is used to calculate \
     a quality factor for different compression rate.  \
     Integer. Default: 50')
-train_quant_only = False
-train_cnn_only = False
+parser.add_argument('--quant_only', action = 'store_true')
+parser.add_argument('--cnn_only', action = 'store_true')
+
+
 feature_extract = False
 #parse the inputs
 args,unparsed = parser.parse_known_args()
@@ -209,7 +212,9 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     val_acc_history = []
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
-    phases =['val'] if (train==False) else ['train','val']
+    phases =['train', 'val'] 
+    if not train:
+        phases = ['val']
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
@@ -265,7 +270,6 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                     
                     loss = reg_loss + loss
                     _, preds = torch.max(outputs, 1)
-
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
@@ -278,7 +282,13 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
 
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+#             if(epoch_acc < 0.5):
+#                for name, param in model.named_parameters():
+#                    if 'quantize' in name:
+#                        print(param*255)
+            #    torch.save(model.state_dict(), 'model.fail')
 
+            #    sys.exit(0)
             # deep copy the model
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
@@ -498,7 +508,7 @@ def set_parameter_requires_grad(model, first, feature_extract, quant_only=False,
 # 
 
 
-def initialize_model(model_name, num_classes, feature_extract = False, add_jpeg_layer = False, train_quant_only = False, train_cnn_only=False, rand_qtable = True, quality = 50, use_pretrained=True):
+def initialize_model(model_name, num_classes, feature_extract = False, add_jpeg_layer = False, train_quant_only = False, train_cnn_only=False,  rand_qtable = True, quality = 50, use_pretrained=True):
     # Initialize these variables which will be set in this if statement. Each of these
     #   variables is model specific.
     model_ft = None
@@ -512,7 +522,7 @@ def initialize_model(model_name, num_classes, feature_extract = False, add_jpeg_
            True, feature_extract)       
         num_ftrs = model_ft.fc.in_features
         model_ft.fc = nn.Linear(num_ftrs, num_classes)
-        input_size = 224
+        input_size = 448
 
     elif model_name == "alexnet":
         """ Alexnet
@@ -522,7 +532,7 @@ def initialize_model(model_name, num_classes, feature_extract = False, add_jpeg_
            True, feature_extract)       
         num_ftrs = model_ft.classifier[6].in_features
         model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
-        input_size = 224
+        input_size = 448
 
     elif model_name == "vgg":
         """ VGG11_bn
@@ -532,7 +542,7 @@ def initialize_model(model_name, num_classes, feature_extract = False, add_jpeg_
            True, feature_extract)    
         num_ftrs = model_ft.classifier[6].in_features
         model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
-        input_size = 224
+        input_size = 448
 
     elif model_name == "squeezenet":
         """ Squeezenet
@@ -542,7 +552,7 @@ def initialize_model(model_name, num_classes, feature_extract = False, add_jpeg_
            True, feature_extract)       
         model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1,1), stride=(1,1))
         model_ft.num_classes = num_classes
-        input_size = 224
+        input_size = 448
 
     elif model_name == "densenet":
         """ Densenet
@@ -552,7 +562,7 @@ def initialize_model(model_name, num_classes, feature_extract = False, add_jpeg_
            True, feature_extract)       
         num_ftrs = model_ft.classifier.in_features
         model_ft.classifier = nn.Linear(num_ftrs, num_classes) 
-        input_size = 224
+        input_size = 448
 
     elif model_name == "inception":
         """ Inception v3 
@@ -574,21 +584,26 @@ def initialize_model(model_name, num_classes, feature_extract = False, add_jpeg_
         exit()
     
     if add_jpeg_layer:
-        if train_quant_only:
+        if train_quant_only and not train_cnn_only:
             model_ft.load_state_dict(torch.load("model.final"))
+
+#        if loadfull:
+#            model_ft.load_state_dict(torch.load("model.final"))
+#            model_ft = model_ft[1]
         model_ft = nn.Sequential(JpegLayer( \
                    rand_qtable = rand_qtable, cnn_only = train_cnn_only, quality = quality),\
                    model_ft)
-
     set_parameter_requires_grad(model_ft,\
            False, feature_extract,
            train_quant_only, train_cnn_only)
+           
+#    model_ft.load_state_dict(torch.load("model.fail"))
     return model_ft, input_size
 
 
 
 # Initialize the model for this run
-model_ft, input_size = initialize_model(args.model_name, args.num_classes, feature_extract, args.add_jpeg_layer, train_quant_only, train_cnn_only, args.rand_qtable, args.quality, use_pretrained=True)
+model_ft, input_size = initialize_model(args.model_name, args.num_classes, feature_extract, args.add_jpeg_layer, args.quant_only, args.cnn_only,  args.rand_qtable, args.quality, use_pretrained=True)
     
 # Print the model we just instantiated
 print(model_ft) 
@@ -665,17 +680,17 @@ for name,param in model_ft.named_parameters():
         params_to_update.append(param)
         print('\t',name)
             
-iftrain = not(train_quant_only and train_cnn_only)
-optimizer = None
+iftrain = not(args.quant_only and args.cnn_only)
 if iftrain:
 # Observe that all parameters are being optimized
     #if train_quant_only:
     #optimizer_ft = optim.Adam(params_to_update, lr = 0.0001)
     #else:
     optimizer_ft = optim.SGD(params_to_update, lr = 0.0005, momentum=0.9)
+else:
+    optimizer_ft = None
     # optim.SGD([{'params': params_to_update},\
        # {'params': params_quantize, 'lr': 0.005, 'momentum':0.9}], lr=0.0005, momentum=0.9)
-print(optimizer_ft)
 
 
 ######################################################################
@@ -695,7 +710,7 @@ criterion = nn.CrossEntropyLoss()
 
 # Train and evaluate
 model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=args.num_epochs, is_inception=(args.model_name=="inception"), train = iftrain)
-if args.add_jpeg_layer == False:
+if args.cnn_only == True and iftrain:
     torch.save(model_ft.state_dict(), "model.final")
 
 #print the trained quantization matrix
@@ -725,7 +740,7 @@ if args.add_jpeg_layer:
 
 
 
-    data, _ = image_datasets["train"][0]
+    data, _ = image_datasets["val"][0]
     
     f1 = data.cpu().data.numpy()
     f1 = (np.transpose(f1,(1,2,0))*255).astype(np.uint8)
