@@ -100,7 +100,6 @@ def run_length_encode(arr):
     values = []
 
     run_length = 0
-
     for i, elem in enumerate(arr):
         if i > last_nonzero:
             symbols.append((0, 0))
@@ -110,6 +109,7 @@ def run_length_encode(arr):
             run_length += 1
         else:
             size = bits_required(elem)
+            #print(elem)
             symbols.append((run_length, size))
             values.append(int_to_binstr(elem))
             run_length = 0
@@ -158,8 +158,8 @@ def write_to_file(filepath, dc_y, ac_y, dc_c, ac_c, blocks_count, tables):
                 category = bits_required(dc_y[b])
                 symbols, values = run_length_encode(ac_y[b, :])
             else:
-                category = bits_required(dc_c[b*(c-1)])
-                symbols, values = run_length_encode(ac_c[b*(c-1), :])
+                category = bits_required(dc_c[b+(c-1)*blocks_count[c]])
+                symbols, values = run_length_encode(ac_c[b + (c-1)*blocks_count[c], :])
 
             dc_table = tables['dc_y'] if c == 0 else tables['dc_c']
             ac_table = tables['ac_y'] if c == 0 else tables['ac_c']
