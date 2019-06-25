@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-
+import sys
 class LearnableQuantization(nn.Module):
     def __init__(self, bandwidth=8, n_dev = 3,temperature = 1, noise = 0):
         super(LearnableQuantization, self).__init__()
@@ -17,7 +17,7 @@ class LearnableQuantization(nn.Module):
         quantize.fill_(alpha)
         self.alpha = nn.Parameter(quantize)
         self.beta = nn.Parameter(quantize.clone()*0, requires_grad = False)
-        self.deviation = nn.Parameter(quantize.clone()/3)
+        self.deviation = nn.Parameter(quantize.clone()/3, requires_grad = False)
         #hyperparameter
         self.n_dev = n_dev
         self.T = temperature
@@ -68,31 +68,34 @@ class LearnableQuantization(nn.Module):
         grid = self.grid * self.alpha.unsqueeze(-1) + self.beta.unsqueeze(-1)
         if self.training:
             cdf = torch.sigmoid( -1 * (x.unsqueeze(-1) - grid)/self.deviation.unsqueeze(-1) )
-            print('cdf',cdf[0,0,0,0,0])
             cdf = cdf.permute(5,0,1,2,3,4)
             pi = ( (cdf[1:] - cdf[:-1] 
-                    +self.noise )
-                    / 
-                    (
-                    cdf[self.K] - cdf[0] 
-                    +
-                    self.noise*self.K
+                    #+self.noise )
+                    #)/ 
+                    #(
+                    #cdf[self.K] - cdf[0] 
+                    #+
+                    #self.noise*self.K
                     ) 
                     )
-            g = torch.distributions.Gumbel(self.loc,self.scale)
-            u = g.expand(pi.shape).sample()
-            z = ( (pi.log()+u)/self.T ).exp()
-            z = (z/z.sum(0)).permute(1,2,3,4,5,0)
+            #g = torch.distributions.Gumbel(self.loc,self.scale)
+            u = 0 #g.expand(pi.shape).sample()
+            #z = ( (pi.log()+u)/self.T ).exp()
+            #z = torch.exp(torch.log(pi))
+            z = pi
+            z = z.permute(1,2,3,4,5,0)
+            #z = (z/z.sum(0)).permute(1,2,3,4,5,0)
             out = (z*grid[:,:,:-1]).sum(-1)
-
+            #sys.exit()
         else:
             y = self.alpha*torch.round((x-self.beta)/self.alpha) + self.beta
             out = torch.min(grid[:,:,-1],torch.max(grid[:,:,0],y))
         #print(x.abs().view(-1,8,8).mean(0), out.abs().view(-1,8,8).mean(0))
-        print(x[0,0,0,0,0], out[0,0,0,0,0],grid[0,0,0],grid[0,0,-1])
+        #print('-------info', i, '--------') 
+        #print(x[0,0,0,0,0], out[0,0,0,0,0])
+        #print('grid',grid[0,0,0],grid[0,0,-1])
         out = out*self.resize[i]
-        print('-------info---------') 
-        #print('alpha',self.alpha[0,1], self.beta[0,1])
+        print('alpha',self.alpha[0,0], 'dev', self.deviation[0,0])
         print(inp[0,0,0,0,0],out[0,0,0,0,0])
         
         return out, mean, nzeros
