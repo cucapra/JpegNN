@@ -13,7 +13,25 @@ from learnable_quantization import LearnableQuantization
 import operator
 from collections import OrderedDict
 from itertools import islice
+#from qtorch.quant import Quantizer
+#from qtorch import FixedPoint, FloatingPoint
+# define two floating point formats
+#bit_8 = FloatingPoint(exp=5, man=2)
+#bit_16 = FloatingPoint(exp=6, man=9)
 
+# define quantization functions
+#weight_quant = Quantizer(forward_number=bit_8, backward_number=None,
+#                        forward_rounding="nearest", backward_rounding="nearest")
+#grad_quant = Quantizer(forward_number=bit_8, backward_number=None,
+#                        forward_rounding="nearest", backward_rounding="stochastic")
+#momentum_quant = Quantizer(forward_number=bit_16, backward_number=None,
+#                        forward_rounding="nearest", backward_rounding="stochastic")
+#acc_quant = Quantizer(forward_number=bit_16, backward_number=None,
+#                        forward_rounding="nearest", backward_rounding="nearest")
+
+# define a lambda function so that the Quantizer module can be duplicated easily
+#quant = lambda : Quantizer(forward_number=bit_8, backward_number=bit_8,
+#                        forward_rounding="nearest", backward_rounding="nearest")
 class sequential(torch.nn.Module):
     def __init__(self, *args):
         super(sequential, self).__init__()
@@ -70,33 +88,32 @@ class sequential(torch.nn.Module):
 class JpegLayer(torch.nn.Module):
     def __init__(self, rand_qtable = False, block_size = 8, cnn_only = True,  quality = 50):
         super(JpegLayer, self).__init__()
-        #if rand_qtable == False:
-        #    f = open("init.txt","r")
-        #    a = re.sub('\s+','',f.read())
-        #    quantize = np.array(literal_eval(a))/255
-        #    quantize /= 3
-        #    self.quantize = torch.nn.Parameter(torch.FloatTensor(quantize.copy()), requires_grad = True)
-        #    
-        #else:
-        #    quantize = torch.FloatTensor(3, block_size, block_size)
-        #    torch.nn.init.uniform(quantize,50/255,50/255)
-        #    #for x in range(2,6):
-        #    #    for y in range(2,6):
-        #    #        quantize[:,x,y] = 1/255
-        #    #quantize[0,0,0] = 7000/255
-        #    #quantize[1,0,0] = 1200/255
-        #    #quantize[2,0,0] = 2000/255
-        #    #quantize[:,0,1] = 100/255
-        #    #quantize[:,1,0] = 100/255
-        #    self.quantize = torch.nn.Parameter( quantize, requires_grad = True )
-        #self.quality = self.__scale_quality(quality) \
-        #                if cnn_only else 100
+        if rand_qtable == False:
+            f = open("init.txt","r")
+            a = re.sub('\s+','',f.read())
+            quantize = np.array(literal_eval(a))/255
+            quantize /= 3
+            self.quantize = torch.nn.Parameter(torch.FloatTensor(quantize.copy()), requires_grad = True)
+            
+        else:
+            quantize = torch.FloatTensor(3, block_size, block_size)
+            torch.nn.init.uniform(quantize,50/255,50/255)
+            #for x in range(2,6):
+            #    for y in range(2,6):
+            #        quantize[:,x,y] = 1/255
+            #quantize[0,0,0] = 7000/255
+            #quantize[1,0,0] = 1200/255
+            #quantize[2,0,0] = 2000/255
+            #quantize[:,0,1] = 100/255
+            #quantize[:,1,0] = 100/255
+            #self.quantize = torch.nn.Parameter( quantize, requires_grad = True )
+        self.quality = self.__scale_quality(quality) \
+                        if cnn_only else 100
         self.bs = block_size
         self.dctmtx = torch.nn.Parameter(self.__dctmtx(self.bs),requires_grad = False)
         #gradients
         #self.round = gradient.RoundNoGradient
         self.clamp = gradient.ClampNoGradient
-        print(self.dctmtx.is_cuda)
         self.LQ = LearnableQuantization()
         self.xform1 = torch.nn.Parameter(torch.FloatTensor([[.299,.587,.114],
                   [-0.168735892 ,- 0.331264108, 0.5],
@@ -106,7 +123,10 @@ class JpegLayer(torch.nn.Module):
                 [1, - 0.344136286, - 0.714136286], 
                 [1, 1.772, 0]]),
                 requires_grad = False)
-
+        #forward_num = FixedPoint(wl=8, fl=1)
+        #backward_num = FloatingPoint(exp=3, man=1)
+        #self.Q = Quantizer(forward_number=backward_num, backward_number=backward_num,
+        #forward_rounding="stochastic", backward_rounding="stochastic")
         #mask_qtable = torch.zeros([3, block_size, block_size],dtype = torch.uint8)
         #for i in range(2, block_size-2):
         #    mask_qtable[:,i,2:block_size-2] = 1
@@ -135,7 +155,7 @@ class JpegLayer(torch.nn.Module):
         samples2 = []
         nzeros = 0
         means = 0
-        decimal = 5
+        decimal = 1
         for i in range(0,3):
             #if i != 0:
             #    samples2.append(samples[i])
@@ -143,6 +163,7 @@ class JpegLayer(torch.nn.Module):
         #blocking
             sts1 = torch.stack((torch.split(samples[i], self.bs, 1)), 1)
             sts2 = torch.stack((torch.split(sts1, self.bs, 3)), 2)
+            #print(sts2)
             #if i==0: print(i,self.quantize[i]*255)
             #print(torch.all( (sts2+128/255)>=0) )
             #idcts = sts2*self.quantize[i]
@@ -150,14 +171,14 @@ class JpegLayer(torch.nn.Module):
 
  #       #dct
             dcts = torch.matmul(torch.matmul(self.dctmtx,sts2),self.dctmtx.t() )
-            decomp, mean, nzeros = self.LQ(dcts)
- #           
- #           #dctst= self.dct2(np.array(ycbcr[0,0,0:8,0:8].cpu() ) )
- #           #print(torch.matmul(self.dctmtx,sts2)[0][0][0])
- #           #print(dctst, dcts[0][0][0])
- #           #print(np.all(dctst==np.array(dcts[0][0][0].cpu()) ) )
- #           decomp = 0
- #           comp = 0
+            
+            #decomp, mean, nzeros = self.LQ(dcts,i)
+            #decomp = decomp*0
+            #decomp[:,:,:,0,0] = dcts[:,:,:,0,0]
+            #print(dcts[:,:,:,0,0])
+            
+            decomp = 0
+            comp = 0
  #           mean_dct = dcts.view(-1,8,8).mean(dim=0)
  #           std_dct = dcts.view(-1,8,8).std(dim = 0)
  #           mask = ( (dcts.view(-1,8,8).abs() ).mean(dim=0)>0).expand_as(dcts)
@@ -166,32 +187,38 @@ class JpegLayer(torch.nn.Module):
  #           #dcts[:,:,:,4:8,:] = 0 #let's forget about first component, don't train it
  #           #std_dct[4:8,:] = 0
  #           #mean_dct[4:8,:] = 0
- #           if i == 0: 
- #               print(i)
- #               print('mean freq', dcts.view(-1,8,8).abs().mean(dim=0))
- #               print('qtable',self.quantize[i]*255)
- #           if self.training:
- #               comp = dcts/( self.quantize[i]*self.quality/100 )*decimal
- #               round_comp = self.round.apply(comp)
- #               decomp = round_comp * ( self.quantize[i]*self.quality/100) /decimal
- #           else:#eval mode
- #              # qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
- #               qtable = self.quantize[i]*self.quality/100 
- #               comp = dcts/qtable*decimal
- #               round_comp = self.round.apply(comp)
- #               decomp = round_comp*qtable/decimal
+
+            mean = 0
+            if self.training:
+                #comp = dcts/( self.quantize[i]*self.quality/100 )*decimal
+                #round_comp = self.Q(comp)
+                #decomp = round_comp * ( self.quantize[i]*self.quality/100) /decimal
+                decomp, mean, _ = self.LQ(dcts, i)
+                if i == 0 and False: 
+               #    #print(i)
+               #    #print('mean freq', dcts.view(-1,8,8).abs().mean(dim=0))
+                   print(dcts[0,0,0,0])
+               #    print(comp[0,0,0,0,0])
+                   print(decomp[0,0,0,0])                               
+
+            else:#eval mode
+               # qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
+                decomp, mean, _ = self.LQ(dcts, i)
+               # qtable = self.quantize[i]*self.quality/100 
+               # comp = dcts/qtable*decimal
+               # round_comp = self.Q(comp)
+               # decomp = round_comp*qtable/decimal
  #           decomp = torch.where(mask, decomp * std_dct + mean_dct, 0*decomp)
  #           #nzeros += round_comp.nonzero().size(0)
  #           #cnt += round_comp.numel()
  #           #print(nzeros/cnt)
- #           mean = comp.view(-1,8,8).abs().mean(dim = 0)
- #           #print(i,mean)
- #           #mean = self.quantize[i].sum()
+            #mean = 0 #decomp.view(-1,8,8).abs().mean(dim = 0)
+ #          print(i,mean)
             if i == 0:
                 means = mean
             else:
                 means += mean
- #           
+            
             idcts = torch.matmul(torch.matmul(self.dctmtx.t(), decomp), self.dctmtx)
             sts3 = torch.cat(torch.unbind(idcts, 2), 3)
             sts4 = torch.cat(torch.unbind(sts3, 1), 1)
@@ -272,7 +299,7 @@ class JpegLayer(torch.nn.Module):
         ycbcr = torch.matmul(ycbcr, self.xform1.t())
         ycbcr[:,:,:,[1,2]] += 128/255
         #put mask
-        #ycbcr = torch.clamp(ycbcr,0,1)
+        ycbcr = torch.clamp(ycbcr,0,1)
         ycbcr = ycbcr.permute(0,3,1,2)
         return ycbcr
 
@@ -281,7 +308,7 @@ class JpegLayer(torch.nn.Module):
         rgb[:,:,:,[1,2]] -= 128/255
         rgb = torch.matmul(rgb, self.xform2.t())
         #put mask
-        #rgb = self.clamp.apply(rgb,0,1)
+        rgb = self.clamp.apply(rgb,0,1)
         rgb = rgb.permute(0,3,1,2)
         return rgb
 

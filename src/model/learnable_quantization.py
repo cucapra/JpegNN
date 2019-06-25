@@ -16,8 +16,8 @@ class LearnableQuantization(nn.Module):
         alpha = t + 3*t/(2**bandwidth)
         quantize.fill_(alpha)
         self.alpha = nn.Parameter(quantize)
-        self.beta = nn.Parameter(quantize.clone()*0, requires_grad = False)
-        self.deviation = nn.Parameter(quantize.clone()/3, requires_grad = False)
+        self.beta = nn.Parameter(quantize.clone()*0, requires_grad = True)
+        self.deviation = nn.Parameter(quantize.clone()/3, requires_grad = True)
         #hyperparameter
         self.n_dev = n_dev
         self.T = temperature
@@ -63,11 +63,11 @@ class LearnableQuantization(nn.Module):
         #        #x[:,:,:,i,j]/=torch.max(x.abs()[:,:,:,i,j])
         #        resize[i,j] = torch.max(x.abs()[:,:,:,i,j])
         x=inp/self.resize[i]
-        mean = (x.view(-1,8,8)).abs().mean(dim = 0)
+        mean = 0 #(x.view(-1,8,8)).abs().mean(dim = 0)
         nzeros = 0
-        grid = self.grid * self.alpha.unsqueeze(-1) + self.beta.unsqueeze(-1)
+        grid = self.grid * torch.abs(self.alpha.unsqueeze(-1)) + self.beta.unsqueeze(-1)
         if self.training:
-            cdf = torch.sigmoid( -1 * (x.unsqueeze(-1) - grid)/self.deviation.unsqueeze(-1) )
+            cdf = torch.sigmoid( -1 * (x.unsqueeze(-1) - grid)/torch.abs(self.deviation.unsqueeze(-1))  )
             cdf = cdf.permute(5,0,1,2,3,4)
             pi = ( (cdf[1:] - cdf[:-1] 
                     #+self.noise )
@@ -83,10 +83,10 @@ class LearnableQuantization(nn.Module):
             #z = ( (pi.log()+u)/self.T ).exp()
             #z = torch.exp(torch.log(pi))
             z = pi
+            #print(z.sum(0))
+            #z = z/z.sum(0)
             z = z.permute(1,2,3,4,5,0)
-            #z = (z/z.sum(0)).permute(1,2,3,4,5,0)
             out = (z*grid[:,:,:-1]).sum(-1)
-            #sys.exit()
         else:
             y = self.alpha*torch.round((x-self.beta)/self.alpha) + self.beta
             out = torch.min(grid[:,:,-1],torch.max(grid[:,:,0],y))
@@ -95,7 +95,7 @@ class LearnableQuantization(nn.Module):
         #print(x[0,0,0,0,0], out[0,0,0,0,0])
         #print('grid',grid[0,0,0],grid[0,0,-1])
         out = out*self.resize[i]
-        print('alpha',self.alpha[0,0], 'dev', self.deviation[0,0])
-        print(inp[0,0,0,0,0],out[0,0,0,0,0])
+        print('alpha',self.alpha[0,0].data, 'beta', self.beta[0,0].data, 'dev', self.deviation[0,0].data)
+        print(inp[0,0,0,0].data,out[0,0,0,0].data)
         
         return out, mean, nzeros
