@@ -3,12 +3,11 @@ import torch.nn as nn
 import numpy as np
 import sys
 class LearnableQuantization(nn.Module):
-    def __init__(self, bandwidth=8, n_dev = 3,temperature = 1, noise = 0):
+    def __init__(self, bandwidth=3, n_dev = 3,temperature = 1, noise = 0):
         super(LearnableQuantization, self).__init__()
         #distributions
         self.K = 2**bandwidth
         grid = torch.arange(self.K/2*-1,self.K/2+1).type(torch.FloatTensor) - 0.5
-        grid[-1] += 1
         self.grid = nn.Parameter(grid.repeat( (8, 8, 1) ) , requires_grad = False)
         #trainable parameter
         quantize = torch.FloatTensor(8,8)
@@ -17,7 +16,7 @@ class LearnableQuantization(nn.Module):
         quantize.fill_(alpha)
         self.alpha = nn.Parameter(quantize)
         self.beta = nn.Parameter(quantize.clone()*0, requires_grad = True)
-        self.deviation = nn.Parameter(quantize.clone()/3, requires_grad = True)
+        #self.deviation = nn.Parameter(quantize.clone()/3, requires_grad = True)
         #hyperparameter
         self.n_dev = n_dev
         self.T = temperature
@@ -66,8 +65,9 @@ class LearnableQuantization(nn.Module):
         mean = 0 #(x.view(-1,8,8)).abs().mean(dim = 0)
         nzeros = 0
         grid = self.grid * torch.abs(self.alpha.unsqueeze(-1)) + self.beta.unsqueeze(-1)
+        r = grid -  torch.abs(self.alpha.unsqueeze(-1)) * 0.5
         if self.training:
-            cdf = torch.sigmoid( -1 * (x.unsqueeze(-1) - grid)/torch.abs(self.deviation.unsqueeze(-1))  )
+            cdf = torch.sigmoid( -1 * (x.unsqueeze(-1) - r)/ torch.abs(self.alpha.unsqueeze(-1)/3 )  )
             cdf = cdf.permute(5,0,1,2,3,4)
             pi = ( (cdf[1:] - cdf[:-1] 
                     #+self.noise )
@@ -95,7 +95,7 @@ class LearnableQuantization(nn.Module):
         #print(x[0,0,0,0,0], out[0,0,0,0,0])
         #print('grid',grid[0,0,0],grid[0,0,-1])
         out = out*self.resize[i]
-        print('alpha',self.alpha[0,0].data, 'beta', self.beta[0,0].data, 'dev', self.deviation[0,0].data)
+        print('alpha',self.alpha[0,0].data, 'beta', self.beta[0,0].data)
         print(inp[0,0,0,0].data,out[0,0,0,0].data)
         
         return out, mean, nzeros
