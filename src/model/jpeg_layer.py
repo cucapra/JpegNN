@@ -1,7 +1,7 @@
 # coding=utf-8
 import re
 from ast import literal_eval
-
+import os
 import math,copy
 import torch
 import numpy as np
@@ -89,10 +89,12 @@ class JpegLayer(torch.nn.Module):
     def __init__(self, rand_qtable = False, block_size = 8, cnn_only = True,  quality = 50):
         super(JpegLayer, self).__init__()
         if rand_qtable == False:
-            f = open("init.txt","r")
+        
+            dir_path = os.path.dirname(__file__)
+            fname = os.path.join(dir_path,'qtable.txt')
+            f = open(fname,"r")
             a = re.sub('\s+','',f.read())
             quantize = np.array(literal_eval(a))/255
-            quantize /= 3
             self.quantize = torch.nn.Parameter(torch.FloatTensor(quantize.copy()), requires_grad = True)
             
         else:
@@ -114,7 +116,7 @@ class JpegLayer(torch.nn.Module):
         #gradients
         #self.round = gradient.RoundNoGradient
         self.clamp = gradient.ClampNoGradient
-        self.LQ = LearnableQuantization()
+        #self.LQ = LearnableQuantization()
         self.xform1 = torch.nn.Parameter(torch.FloatTensor([[.299,.587,.114],
                   [-0.168735892 ,- 0.331264108, 0.5],
                   [.5,- 0.418687589, - 0.081312411]]),
@@ -188,32 +190,29 @@ class JpegLayer(torch.nn.Module):
  #           #std_dct[4:8,:] = 0
  #           #mean_dct[4:8,:] = 0
 
-            mean = 0
             if self.training:
                 #comp = dcts/( self.quantize[i]*self.quality/100 )*decimal
                 #round_comp = self.Q(comp)
                 #decomp = round_comp * ( self.quantize[i]*self.quality/100) /decimal
-                decomp, mean, _ = self.LQ(dcts, i)
+                #decomp, mean, _ = self.LQ(dcts, i)
                 if i == 0 and False: 
-               #    #print(i)
-               #    #print('mean freq', dcts.view(-1,8,8).abs().mean(dim=0))
-                   print(dcts[0,0,0,0])
-               #    print(comp[0,0,0,0,0])
-                   print(decomp[0,0,0,0])                               
+                   print(i)
+                   print('mean freq', dcts.view(-1,8,8).abs().mean(dim=0))
 
             else:#eval mode
-               # qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
-                decomp, mean, _ = self.LQ(dcts, i)
-               # qtable = self.quantize[i]*self.quality/100 
-               # comp = dcts/qtable*decimal
-               # round_comp = self.Q(comp)
-               # decomp = round_comp*qtable/decimal
+                qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
+               # decomp, mean, _ = self.LQ(dcts, i)
+                #qtable = self.quantize[i]*self.quality/100 
+                comp = dcts/qtable*decimal
+                round_comp = torch.round(comp)
+                decomp = round_comp*qtable/decimal
+                mean = 0
  #           decomp = torch.where(mask, decomp * std_dct + mean_dct, 0*decomp)
  #           #nzeros += round_comp.nonzero().size(0)
  #           #cnt += round_comp.numel()
  #           #print(nzeros/cnt)
             #mean = 0 #decomp.view(-1,8,8).abs().mean(dim = 0)
- #          print(i,mean)
+            #print(i,mean)
             if i == 0:
                 means = mean
             else:

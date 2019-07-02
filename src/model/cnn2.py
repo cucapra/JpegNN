@@ -101,6 +101,7 @@ def parse_args(args):
     args.feature_extract = False
     args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     args.iftrain = not(args.quant_only and args.cnn_only)
+    args.dir = os.path.dirname(__file__)
     print(args)
     return args
 #####################################################################~~~~~~~~~~~~~~~~~~~~
@@ -285,10 +286,11 @@ def initialize_model(args, use_pretrained=True):
     
     if args.add_jpeg_layer:
         print('add jpeg layer!')
+        load_from = os.path.join(args.dir,"model.final")
         if args.quant_only and not args.cnn_only:
-            model_ft.load_state_dict(torch.load("model.final"))
+            model_ft.load_state_dict(torch.load(load_from))
         if not args.iftrain:
-            model_ft.load_state_dict(torch.load("model.final"))
+            model_ft.load_state_dict(torch.load(load_from))
         model_ft = sequential(JpegLayer( \
                    rand_qtable = args.rand_qtable, cnn_only = args.cnn_only, quality = args.quality),\
                    model_ft)
@@ -336,9 +338,9 @@ def create_optimizer(args, model_ft):
     print("Params to learn:")
     for name,param in model_ft.named_parameters():
         if param.requires_grad == True:
-            if 'LQ' in name:
+            if 'quantize' in name:
                 params_quantize.append(param)
-                print('LQ\t', name)
+                print('quantize\t', name)
             else:
                 params_to_update.append(param)
                 print('net\t',name)
@@ -386,8 +388,8 @@ def summarize(args, model_ft, image_datasets):
         #save images
         from psnr import psnr, compressJ, save
         from PIL import Image
-        save(f1, "org.bmp")
-        save(f2, "myJpeg.jpg")
+        save(f1, os.path.join(args.dir, "org.bmp") )
+        save(f2, os.path.join(args.dir, "myJpeg.jpg") )
 
 
 def run(args):
@@ -400,8 +402,9 @@ def run(args):
     # Train and evaluate
     model_ft, hist = train_model(args=args, model=model_ft, dataloaders=dataloaders_dict, criterion=criterion, optimizer=optimizer_ft, is_inception=(args.model_name=="inception") )
     if args.iftrain:
-        torch.save(model_ft.state_dict(), "model.final")
-        
+        torch.save(model_ft.state_dict(), os.path.join(args.dir,"model.final"))
     summarize(args, model_ft, image_datasets)
+    return hist[0].cpu().numpy()
+
 if __name__=='__main__':
     sys.exit(run(sys.argv[1:]))
