@@ -1,0 +1,10 @@
+-b=1
+-qn=qtable.txt
+-m=resnet
+--quality=50
+--quant_only
+--cnn_only
+-v
+-r
+-ep=1
+-rq

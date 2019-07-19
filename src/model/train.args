@@ -1,0 +1,6 @@
+-qn=qtable.txt
+-m=resnet
+-ep=15
+-jpeg
+-r
+
