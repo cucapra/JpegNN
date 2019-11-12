@@ -9,7 +9,8 @@ from torch.nn.parameter import Parameter
 from torch.nn.modules.module import Module
 from scipy.fftpack import dct, idct
 import gradient
-from learnable_quantization import LearnableQuantization
+# from learnable_quantization import LearnableQuantization
+from smooth_rounding import LearnableQuantization
 import operator
 from collections import OrderedDict
 from itertools import islice
@@ -88,8 +89,7 @@ class sequential(torch.nn.Module):
 class JpegLayer(torch.nn.Module):
     def __init__(self, rand_qtable = False, block_size = 8, cnn_only = True,  quality = 50):
         super(JpegLayer, self).__init__()
-        if rand_qtable == False:
-        
+        if not rand_qtable:
             dir_path = os.path.dirname(__file__)
             fname = os.path.join(dir_path,'qtable.txt')
             f = open(fname,"r")
@@ -116,7 +116,7 @@ class JpegLayer(torch.nn.Module):
         #gradients
         #self.round = gradient.RoundNoGradient
         self.clamp = gradient.ClampNoGradient
-        #self.LQ = LearnableQuantization()
+        self.LQ = LearnableQuantization()
         self.xform1 = torch.nn.Parameter(torch.FloatTensor([[.299,.587,.114],
                   [-0.168735892 ,- 0.331264108, 0.5],
                   [.5,- 0.418687589, - 0.081312411]]),
@@ -174,13 +174,13 @@ class JpegLayer(torch.nn.Module):
  #       #dct
             dcts = torch.matmul(torch.matmul(self.dctmtx,sts2),self.dctmtx.t() )
             
-            #decomp, mean, nzeros = self.LQ(dcts,i)
+            decomp, mean, nzeros = self.LQ(dcts,i)
             #decomp = decomp*0
             #decomp[:,:,:,0,0] = dcts[:,:,:,0,0]
             #print(dcts[:,:,:,0,0])
             
-            decomp = 0
-            comp = 0
+            # decomp = 0
+            # comp = 0
  #           mean_dct = dcts.view(-1,8,8).mean(dim=0)
  #           std_dct = dcts.view(-1,8,8).std(dim = 0)
  #           mask = ( (dcts.view(-1,8,8).abs() ).mean(dim=0)>0).expand_as(dcts)
@@ -190,23 +190,23 @@ class JpegLayer(torch.nn.Module):
  #           #std_dct[4:8,:] = 0
  #           #mean_dct[4:8,:] = 0
 
-            if self.training:
-                #comp = dcts/( self.quantize[i]*self.quality/100 )*decimal
-                #round_comp = self.Q(comp)
-                #decomp = round_comp * ( self.quantize[i]*self.quality/100) /decimal
-                #decomp, mean, _ = self.LQ(dcts, i)
-                if i == 0 and False: 
-                   print(i)
-                   print('mean freq', dcts.view(-1,8,8).abs().mean(dim=0))
+            # if self.training:
+            #     #comp = dcts/( self.quantize[i]*self.quality/100 )*decimal
+            #     #round_comp = self.Q(comp)
+            #     #decomp = round_comp * ( self.quantize[i]*self.quality/100) /decimal
+            #     #decomp, mean, _ = self.LQ(dcts, i)
+            #     if i == 0 and False: 
+            #        print(i)
+            #        print('mean freq', dcts.view(-1,8,8).abs().mean(dim=0))
 
-            else:#eval mode
-                qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
-               # decomp, mean, _ = self.LQ(dcts, i)
-                #qtable = self.quantize[i]*self.quality/100 
-                comp = dcts/qtable*decimal
-                round_comp = torch.round(comp)
-                decomp = round_comp*qtable/decimal
-                mean = 0
+            # else:#eval mode
+            #     qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
+            #    # decomp, mean, _ = self.LQ(dcts, i)
+            #     #qtable = self.quantize[i]*self.quality/100 
+            #     comp = dcts/qtable*decimal
+            #     round_comp = torch.round(comp)
+            #     decomp = round_comp*qtable/decimal
+            #     mean = 0
  #           decomp = torch.where(mask, decomp * std_dct + mean_dct, 0*decomp)
  #           #nzeros += round_comp.nonzero().size(0)
  #           #cnt += round_comp.numel()

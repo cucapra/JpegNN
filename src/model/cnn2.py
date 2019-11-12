@@ -88,6 +88,9 @@ def parse_args(args):
         quantizaiton table. Without the term, the quantization \
         table goes to 0 \
         Bool. Default: True')
+    parser.add_argument('--gpu_id', type=str,\
+        default = '0',\
+        help = 'Specify GPU id')
     
     parser.add_argument('--quality', type = int,\
         default = 50,\
@@ -99,7 +102,7 @@ def parse_args(args):
     
     args,unparsed = parser.parse_known_args()
     args.feature_extract = False
-    args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     args.iftrain = not(args.quant_only and args.cnn_only)
     args.dir = os.path.dirname(__file__)
     print(args)
@@ -155,8 +158,8 @@ def train_model(args, model, dataloaders, criterion, optimizer, is_inception=Fal
                             outputs = model(inputs)
                         loss = criterion(outputs, labels)
                         if args.regularize and args.add_jpeg_layer:
-                            reg_crit = nn.L1Loss(size_average = True)
-                            target = torch.zeros([8,8]).to(device)
+                            reg_crit = nn.L1Loss(reduction='mean')
+                            target = torch.zeros([8,8]).to(args.device)
                             factor = 0.02
                             reg_loss = factor*reg_crit(means,target)
                             #loss = loss + reg_loss
@@ -164,6 +167,9 @@ def train_model(args, model, dataloaders, criterion, optimizer, is_inception=Fal
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
+                        # qt_grad = getattr(model,'0').LQ.qtable.grad
+                        # print(qt_grad, qt_grad.shape)
+                        # raise Exception('ddddd')
                         optimizer.step()
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
@@ -394,6 +400,8 @@ def summarize(args, model_ft, image_datasets):
 
 def run(args):
     args = parse_args(args)
+    args.device = torch.device("cuda:{}".format(args.gpu_id) if torch.cuda.is_available() else "cpu")
+
     model_ft, input_size = initialize_model(args,use_pretrained=True)
     image_datasets, dataloaders_dict = load_data(args, input_size) 
     
