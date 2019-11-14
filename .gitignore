@@ -1,2 +1,5 @@
 *.out
 *.png
+*.jpg
+*.bmp
+*__pycache__*

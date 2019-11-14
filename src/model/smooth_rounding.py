@@ -29,25 +29,31 @@ def smoothRd(_input,q=5., scale=100.):
     # https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/symbolic_script.cpp
     # rem = _input%q
 
-    noGradQ = q.detach().repeat(*_input.shape[:-2],1,1)
+    noGradQ = torch.round(q.detach().repeat(*_input.shape[:-2],1,1))
     # rem = torch.remainder(_input,q) # sign same as q
+    ### 1
+    # idx = rem>q/2
+    # offset = rem.clone().fill_(0.5)
+    # offset[~idx] = -0.5
+    # delta = rem.clone()
+    # if isinstance(q, torch.Tensor):
+    #     delta[idx] = rem[idx]-noGradQ[idx]
+    # else:
+    #     delta[idx] = rem[idx]-q
+    # smooth_rd = torch.sigmoid(delta*scale/q) + offset
+    # return base+smooth_rd
+
+    ### 2
     rem = torch.fmod(_input,noGradQ) # sign same as _input
     idx = rem<0
     rem[idx] += noGradQ[idx]
     base = (_input-rem)/q
-    
-    delta = rem.clone()
-    idx = rem>q/2
-    if isinstance(q, torch.Tensor):
-        delta[idx] = rem[idx]-noGradQ[idx]
-    else:
-        delta[idx] = rem[idx]-q
+    return base+0.5
 
-    offset = rem.clone().fill_(0.5)
-    offset[~idx] = -0.5
-    smooth_rd = torch.sigmoid(delta*scale/q) + offset
-    # print(_input.requires_grad, q.requires_grad, base.requires_grad, rem.requires_grad, smooth_rd.requires_grad)
-    return base+smooth_rd
+    ### 3
+    # rem = torch.fmod(_input+q/2.,noGradQ)-q/2# sign same as _input
+    # base = (_input-rem)/q
+    # return base
 
 class LearnableQuantization(nn.Module):
     def __init__(self, bandwidth=3, n_dev = 3,temperature = 1, noise = 0):
@@ -132,14 +138,35 @@ class LearnableQuantization(nn.Module):
         [0.0313, 0.0296, 0.0219, 0.0134, 0.0156, 0.0270, 0.0125, 0.0238]])  
         self.resize = nn.Parameter(resize*1.2, requires_grad = False)
 
+        # self.quality = 50
+        # self.decimal = 1
+
     def forward(self, inp, i):
+        # x = inp
         x=inp/self.resize[i]
         # mean = 0 #(x.view(-1,8,8)).abs().mean(dim = 0)
-
         mean = (x.view(-1,8,8)).abs().mean(dim = 0)
         nzeros = 0
+        
+        # ? input*255 before quantize?
+        # print(x[0,0,0])
+        # print(x[0,0,0]*255.)
+        out = smoothRd(x*255.,self.qtable[i])
+        # print(self.qtable[i])
+        # print(out[0,0,0])
+        out = out*self.qtable[i].detach() # smoothRd((x-self.beta)/self.alpha) + self.beta
+        # print(out[0,0,0])
+        out /= 255.
+        # print(out[0,0,0])
+        # raise Exception('ddd')
 
-        out = self.qtable[i].detach() * smoothRd(x, self.qtable[i]) # smoothRd((x-self.beta)/self.alpha) + self.beta
+        # qtable = torch.round(self.quantize[i]*255*self.quality/100 + 0.5)/255
+        # comp = dcts/qtable*decimal
+        # round_comp = torch.round(comp)
+        # decomp = round_comp*qtable/decimal
+
+
+
         # if self.training:
         #     cdf = torch.sigmoid( -1 * (x.unsqueeze(-1) - r)/ torch.abs(self.alpha.unsqueeze(-1)/3 )  )
         #     cdf = cdf.permute(5,0,1,2,3,4)
@@ -170,7 +197,6 @@ class LearnableQuantization(nn.Module):
         #print(x[0,0,0,0,0], out[0,0,0,0,0])
         #print('grid',grid[0,0,0],grid[0,0,-1])
         out = out*self.resize[i]
-        
         
         return out, mean, nzeros
 

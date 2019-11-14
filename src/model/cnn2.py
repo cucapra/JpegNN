@@ -124,6 +124,10 @@ def train_model(args, model, dataloaders, criterion, optimizer, is_inception=Fal
         print('Epoch {}/{}'.format(epoch, args.num_epochs - 1))
         print('-' * 10)
 
+        qt_param = getattr(model,'0').LQ.qtable
+        print('Quantization Tables:', qt_param.shape)
+        print('QT-Value:', qt_param.data)
+
         # Each epoch has a training and validation phase
         for phase in phases:
             if phase == 'train':
@@ -135,7 +139,7 @@ def train_model(args, model, dataloaders, criterion, optimizer, is_inception=Fal
             running_corrects = 0
 
             # Iterate over data.
-            for inputs, labels in dataloaders[phase]:
+            for idx, (inputs, labels) in enumerate(dataloaders[phase]):
                 inputs = inputs.to(args.device)
                 labels = labels.to(args.device)
                 # zero the parameter gradients
@@ -167,9 +171,9 @@ def train_model(args, model, dataloaders, criterion, optimizer, is_inception=Fal
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
-                        # qt_grad = getattr(model,'0').LQ.qtable.grad
-                        # print(qt_grad, qt_grad.shape)
-                        # raise Exception('ddddd')
+                        if idx==0:
+                            # qt_grad = getattr(model,'0').LQ.qtable.grad
+                            print('QT-Gradient:', qt_param.grad)
                         optimizer.step()
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
@@ -187,7 +191,7 @@ def train_model(args, model, dataloaders, criterion, optimizer, is_inception=Fal
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
 
-        print()
+        # print()
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
@@ -352,8 +356,11 @@ def create_optimizer(args, model_ft):
                 print('net\t',name)
                 
     if args.iftrain:
+        # optimizer_ft = optim.SGD(
+        #     [{'params': params_to_update}, {'params': params_quantize, 'lr': 0.00001} ], 
+        #     lr = 0.0005, momentum=0.9)
         optimizer_ft = optim.SGD(
-            [{'params': params_to_update}, {'params': params_quantize, 'lr': 0.00001} ], 
+            [{'params': params_to_update}, {'params': params_quantize, 'lr': 0.005} ], 
             lr = 0.0005, momentum=0.9)
     else:
         optimizer_ft = None
@@ -367,7 +374,7 @@ def summarize(args, model_ft, image_datasets):
         print('--------- the trained quantize table ---------')
         for name,param in model_ft.named_parameters():
             if param.requires_grad == True and\
-                    "quantize" in name:
+                    "qtable" in name:
                 print(name, param.data*255)
 
     def get_activation(name):
@@ -384,6 +391,7 @@ def summarize(args, model_ft, image_datasets):
         data.unsqueeze_(0)
         output = model_ft(data.to(args.device))
         f2 = activation['0.JpegLayer'].squeeze().cpu().data.numpy()
+        print('after JpegLayer:', f2)
         f2 = (np.transpose(f2, (1,2,0))*255).astype(np.uint8)
         if args.visualize: 
             fig, axarr = plt.subplots(2)
@@ -415,4 +423,5 @@ def run(args):
     return hist[0].cpu().numpy()
 
 if __name__=='__main__':
+    # python src/model/cnn2.py --gpu_id=3
     sys.exit(run(sys.argv[1:]))
