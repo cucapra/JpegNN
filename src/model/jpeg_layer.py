@@ -87,7 +87,7 @@ class sequential(torch.nn.Module):
         return input, output2,output3
 
 class JpegLayer(torch.nn.Module):
-    def __init__(self, rand_qtable = False, block_size = 8, cnn_only = True,  quality = 50):
+    def __init__(self, rand_qtable=False, block_size=8, cnn_only=True,  quality=50):
         super(JpegLayer, self).__init__()
         if not rand_qtable:
             dir_path = os.path.dirname(__file__)
@@ -99,7 +99,7 @@ class JpegLayer(torch.nn.Module):
             
         else:
             quantize = torch.FloatTensor(3, block_size, block_size)
-            torch.nn.init.uniform(quantize,50/255,50/255)
+            torch.nn.init.uniform_(quantize,50/255,50/255)
             #for x in range(2,6):
             #    for y in range(2,6):
             #        quantize[:,x,y] = 1/255
@@ -225,18 +225,12 @@ class JpegLayer(torch.nn.Module):
         #nzeros = nzeros/cnt
         ycbcr2 = self.__upsample(samples2)
         y_pred = self.__ycbcr2rgb(ycbcr2+128/255)
-#        a,b,c,d = y_pred.shape
-#        for i in range(a):
-#            for j in range(b):
-#                for k in range(c):
-#                    for p in range(d):
-#                        if y_pred[i][j][k][p].item()!=rgb[i][j][k][p].item():
-#                            print("diff!: ", i, j, k, p,"-",\
-#                            y_pred[i][j][k][p].item(),\
-#                                rgb[i][j][k][p].item())
-#        
-        #return y_pred
-        #print(means/3)
+
+        # normalize:
+        mean = torch.as_tensor([0.485, 0.456, 0.406], dtype=y_pred.dtype, device=y_pred.device)
+        std = torch.as_tensor([0.229, 0.224, 0.225], dtype=y_pred.dtype, device=y_pred.device)
+        y_pred.sub_(mean[:, None, None]).div_(std[:, None, None])
+        
         return y_pred[:,:,0:w,0:h], means, nzeros
 
     def __scale_quality(self, quality=75):
@@ -295,6 +289,7 @@ class JpegLayer(torch.nn.Module):
 
     def __rgb2ycbcr(self,rgb):
         ycbcr = rgb.permute(0,2,3,1)
+        # print(ycbcr.device, self.xform1.device)
         ycbcr = torch.matmul(ycbcr, self.xform1.t())
         ycbcr[:,:,:,[1,2]] += 128/255
         #put mask
